@@ -32,13 +32,18 @@ class FixHeightMode(enum.Enum):
 # 额外的逐帧字段 "softsonic"，携带柔顺增强的监督目标与要回放的外力。
 # 完全照 "action" 字段的模式接线，以便复用已有的帧索引与 30→50Hz 重采样逻辑。
 #
-# 形状 (T, 43)，列布局：
-#     [ 0: 3]  增强后根平移 q_aug
-#     [ 3: 7]  增强后根旋转 q_aug（四元数 xyzw）
-#     [ 7:36]  增强后关节角 q_aug（29，MuJoCo 顺序）
-#     [36:39]  要施加的外力 F（世界系，N）
-#     [39:42]  要施加的外力矩 tau（N·m）
-#     [42:43]  受力连杆的**规范索引**，见下方 SOFTSONIC_FORCE_BODIES（-1 = 无目标连杆）
+# 形状 (T, 7)，列布局：
+#     [0:3]  要施加的外力 F（世界系，N）
+#     [3:6]  要施加的外力矩 tau（N·m）
+#     [6:7]  受力连杆的**规范索引**，见下方 SOFTSONIC_FORCE_BODIES（-1 = 无目标连杆）
+#
+# 这里**只存外力**，不存 q_aug 的位姿。柔顺监督目标 q_aug 走另一条路：pkl 里的
+# `pose_aa_aug` / `root_trans_aug` 字段在加载时过第二次 fk_batch，得到与 q_ref
+# 同等质量的连杆位姿缓冲（body_pos_w_aug / body_quat_w_aug）。这样做的理由：
+#   1. 奖励项比较的是**连杆位置**而非关节角，FK 这一步无论如何要做，且必须在加载时
+#      做一次 —— 4096 环境每步做 FK 太浪费。
+#   2. fk_batch 自带 30->50Hz 插值（含四元数正确处理），比对 q_aug 做最近邻好。
+# 外力则相反：它是分段常量，最近邻才是正确的，所以留在本字段里。
 #
 # 陷阱：[42:43] >= 0 **不代表该帧真的在施力**。CMA 存的 link_id 取自
 # `current_event if current_event else event_queue[0]`（runner.py:405-407），
@@ -51,7 +56,7 @@ class FixHeightMode(enum.Enum):
 # 注意外力必须与生成 q_aug 时所用的力逐帧一致，否则 q_aug 不是正确的监督目标 ——
 # 这就是为什么力要从数据里回放而不是在仿真里独立采样。
 SOFTSONIC_FIELD = "softsonic"
-SOFTSONIC_WIDTH = 43
+SOFTSONIC_WIDTH = 7
 # 可受力连杆的规范顺序（SoftMimic constants.py 的 FORCEABLE_LINKS 与
 # DOWNWARD_ONLY_FORCEABLE_LINKS 之并集）。索引写进数据，名字在运行时解析。
 SOFTSONIC_FORCE_BODIES = [
@@ -62,13 +67,13 @@ SOFTSONIC_FORCE_BODIES = [
     "right_shoulder_pitch_link",
 ]
 SOFTSONIC_SLICES = {
-    "aug_root_trans": slice(0, 3),
-    "aug_root_quat_xyzw": slice(3, 7),
-    "aug_dof": slice(7, 36),
-    "ext_force": slice(36, 39),
-    "ext_torque": slice(39, 42),
-    "force_body_id": slice(42, 43),
+    "ext_force": slice(0, 3),
+    "ext_torque": slice(3, 6),
+    "force_body_id": slice(6, 7),
 }
+# 柔顺监督目标走 fk_batch 那条路，这两个字段是它的输入
+SOFTSONIC_AUG_POSE_FIELD = "pose_aa_aug"
+SOFTSONIC_AUG_TRANS_FIELD = "root_trans_aug"
 # ──────────────────────────────────────────────────────────────────────────────
 
 class MotionlibMode(enum.Enum):
@@ -274,6 +279,7 @@ class MotionLibBase:
         self.mesh_parsers = None
         self.has_action = False
         self.has_softsonic = False
+        self.has_aug_pose = False
         skeleton_file = Path(self.m_cfg.asset.assetRoot) / self.m_cfg.asset.assetFileName
         self.skeleton_tree = skeleton.SkeletonTree.from_mjcf(skeleton_file)
         logger.info(f"Loaded skeleton from {skeleton_file}")
@@ -613,6 +619,28 @@ class MotionLibBase:
                 "加 --with-softsonic 重新生成。"
             )
         return self._motion_softsonic[motion_steps + self.length_starts[motion_ids]]
+
+    def get_body_pos_w_aug(self, motion_ids, motion_steps):
+        """取柔顺监督目标 q_aug 的连杆世界位置。
+
+        与 ``get_body_pos_w`` 完全平行（同样的重排、切片与按步索引），只是数据来自
+        对 ``pose_aa_aug`` 跑的第二次 fk_batch。奖励项用它替代 q_ref 的目标。
+        """
+        if not self.has_aug_pose:
+            raise RuntimeError(
+                "动作数据里没有 'pose_aa_aug' 字段。用 scripts/cma_to_motionlib.py "
+                "加 --with-softsonic 重新生成。"
+            )
+        return self.body_pos_w_aug[motion_steps + self.length_starts[motion_ids]]
+
+    def get_body_quat_w_aug(self, motion_ids, motion_steps):
+        """取柔顺监督目标 q_aug 的连杆世界朝向（**wxyz**，与 get_body_quat_w 一致）。"""
+        if not self.has_aug_pose:
+            raise RuntimeError(
+                "动作数据里没有 'pose_aa_aug' 字段。用 scripts/cma_to_motionlib.py "
+                "加 --with-softsonic 重新生成。"
+            )
+        return self.body_quat_w_aug[motion_steps + self.length_starts[motion_ids]]
 
     def get_time_step_total(self, motion_ids):
         return self._motion_num_frames[motion_ids]
@@ -1111,6 +1139,8 @@ class MotionLibBase:
         has_action = False  # noqa: F841
         _motion_actions = []
         _motion_softsonic = []
+        _motion_aug_pos = []
+        _motion_aug_quat = []
         _motion_smpl_poses = []
         _motion_smpl_joints = []
         _motion_smpl_transl = []
@@ -1418,6 +1448,9 @@ class MotionLibBase:
                 _motion_actions.append(curr_motion.action)
             if self.has_softsonic:
                 _motion_softsonic.append(curr_motion.softsonic)
+            if self.has_aug_pose:
+                _motion_aug_pos.append(curr_motion.aug_global_translation)
+                _motion_aug_quat.append(curr_motion.aug_global_rotation)
             if self.smpl_data is not None:
                 _motion_smpl_poses.append(curr_motion["smpl_pose"])
                 if "smpl_joints" in curr_motion:
@@ -1554,6 +1587,10 @@ class MotionLibBase:
         self.body_pos_w = (
             torch.cat([m.global_translation for m in motions], dim=0).float().to(self._device)
         )
+        if self.has_aug_pose:
+            # 与 body_pos_w / body_quat_w 平行的柔顺目标缓冲。下面的重索引会同样处理。
+            self.body_pos_w_aug = torch.cat(_motion_aug_pos, dim=0).float().to(self._device)
+            self.body_quat_w_aug = torch.cat(_motion_aug_quat, dim=0).float().to(self._device)
         self.body_quat_w = (
             torch.cat([m.global_rotation for m in motions], dim=0).float().to(self._device)
         )
@@ -1687,6 +1724,17 @@ class MotionLibBase:
             self.body_quat_w = self.body_quat_w_full[:, self.body_indexes]
             self.body_lin_vel_w = self.body_lin_vel_w_full[:, self.body_indexes]
             self.body_ang_vel_w = self.body_ang_vel_w_full[:, self.body_indexes]
+            if self.has_aug_pose:
+                # 柔顺目标走与主轨迹完全相同的重排与切片；注意 fk_batch 输出的四元数
+                # 是 xyzw，要和主轨迹一样转成 wxyz，否则奖励里两边约定不一致。
+                self.body_pos_w_aug_full = self.body_pos_w_aug[
+                    :, self.m_cfg.mujoco_to_isaaclab_body
+                ]
+                self.body_quat_w_aug_full = rotations.xyzw_to_wxyz(
+                    self.body_quat_w_aug[:, self.m_cfg.mujoco_to_isaaclab_body]
+                )
+                self.body_pos_w_aug = self.body_pos_w_aug_full[:, self.body_indexes]
+                self.body_quat_w_aug = self.body_quat_w_aug_full[:, self.body_indexes]
             assert (
                 self.m_cfg.get("anchor_body_idx_full", 0) == 0 and self.body_indexes[0] == 0
             ), "The anchor body has to be 0; otherwise will cause issues in the sliced body_indexes data's anchor."
@@ -1697,6 +1745,9 @@ class MotionLibBase:
             self.body_lin_vel_w_full = self.body_lin_vel_w
             self.body_ang_vel_w_full = self.body_ang_vel_w
             self.num_bodies_full = self.body_pos_w.shape[2]
+            if self.has_aug_pose:
+                self.body_pos_w_aug_full = self.body_pos_w_aug
+                self.body_quat_w_aug_full = self.body_quat_w_aug
 
         # Run cleanup after slicing so temporary fragments do not live through the next cycle.
         gc.collect()
@@ -1848,6 +1899,13 @@ class MotionLibBase:
             # import ipdb; ipdb.set_trace()
             if "action" in curr_file.keys():  # noqa: SIM118
                 self.has_action = True
+            if SOFTSONIC_AUG_POSE_FIELD in curr_file.keys():  # noqa: SIM118
+                if not self.has_aug_pose:
+                    logger.info(
+                        f"SoftSONIC: 检测到 '{SOFTSONIC_AUG_POSE_FIELD}'，将对柔顺目标 "
+                        "q_aug 额外跑一次 fk_batch"
+                    )
+                self.has_aug_pose = True
             if SOFTSONIC_FIELD in curr_file.keys():  # noqa: SIM118
                 if not self.has_softsonic:
                     logger.info(
@@ -2210,6 +2268,32 @@ class MotionLibBase:
                 # add "action" to curr_motion
                 if self.has_action:
                     curr_motion.action = to_torch(curr_file["action"]).clone()[start:end]
+                if self.has_aug_pose:
+                    # 柔顺监督目标 q_aug 走与主轨迹完全相同的 FK 路径，这样它自动获得
+                    # 同样的 30->50Hz 插值（含四元数正确处理）和同样的帧数。
+                    pose_aa_aug = to_torch(
+                        curr_file[SOFTSONIC_AUG_POSE_FIELD]
+                    ).clone()[start:end]
+                    trans_aug = to_torch(
+                        curr_file[SOFTSONIC_AUG_TRANS_FIELD]
+                    ).clone()[start:end]
+                    # 必须套用主轨迹算出的**同一个** height_diff，不能各自重算 ——
+                    # 否则两条轨迹落在不同高度，奖励目标直接错掉。
+                    trans_aug[..., 2] -= trans_fix
+                    aug_out = self.mesh_parsers.fk_batch(
+                        pose_aa_aug[None,],
+                        trans_aug[None,],
+                        return_full=True,
+                        fps=curr_file["fps"],
+                        target_fps=self.target_fps,
+                        interpolate_data=True,
+                        use_parallel_fk=self.use_parallel_fk,
+                    )
+                    curr_motion.aug_global_translation = (
+                        aug_out["global_translation"].squeeze(0)
+                    )
+                    # 注意这里仍是 fk_batch 的 xyzw 约定，转 wxyz 在统一重索引处做
+                    curr_motion.aug_global_rotation = aug_out["global_rotation"].squeeze(0)
                 if self.has_softsonic:
                     raw_ss = to_torch(curr_file[SOFTSONIC_FIELD]).clone()[start:end]
                     # 必须重采样到与 fk_batch 输出相同的帧数。curr_file 里的字段是
@@ -2218,10 +2302,9 @@ class MotionLibBase:
                     # 不对齐的话 get_motion_softsonic 会索引越界。
                     n_tgt = curr_motion.global_rotation.shape[0]
                     if raw_ss.shape[0] != n_tgt:
-                        # 刻意用最近邻：外力和 force_body_id 是分段常量，插值没有物理
-                        # 意义；q_aug 在 30->50Hz 下最近邻最多带来 1/60s≈17ms 的陈旧，
-                        # 相对 200-1000ms 的力斜坡时长可以接受。若将来需要更精细，
-                        # 改成 trans/dof 线性插值 + 四元数 slerp + 力/id 仍最近邻。
+                        # 最近邻是正确的选择：本字段现在只存外力、力矩和 body id，
+                        # 三者都是分段常量，插值没有物理意义。（q_aug 的位姿已改走
+                        # fk_batch，由它做正确的插值。）
                         src_idx = torch.linspace(
                             0, raw_ss.shape[0] - 1, n_tgt, device=raw_ss.device
                         ).round().long()
