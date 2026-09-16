@@ -1,0 +1,24 @@
+# SoftSONIC 的事件组合：标准项 + 外力回放
+#
+# 刻意**不含** push_robot：它给基座加随机速度冲量做鲁棒性训练，会与我们要回放的
+# 特定力剖面叠加，污染 q_aug 这个监督目标。柔顺训练阶段先只留数据里的那个力，
+# 等方法站住了再考虑把 push_robot 作为额外域随机化加回来。
+
+defaults:
+  - terms/physics_material@_here_
+  - terms/add_joint_default_pos@_here_
+  - terms/base_com@_here_
+  - terms/randomize_rigid_body_mass@_here_
+  - terms/softsonic_replay_wrench@_here_
+
+_target_: gear_sonic.envs.manager_env.mdp.events.EventCfg
+
+randomize_rigid_body_mass:
+  mode: "startup"
+  params:
+    asset_cfg:
+      _target_: isaaclab.managers.SceneEntityCfg
+      name: "robot"
+      body_names: ".*wrist_yaw.*|torso_link"
+    mass_distribution_params: [0.8, 2.5]
+    operation: "scale"
