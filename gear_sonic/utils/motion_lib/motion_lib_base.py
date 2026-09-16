@@ -590,29 +590,29 @@ class MotionLibBase:
         action = self._motion_actions[f0l]
         return action
 
-    def get_motion_softsonic(self, motion_ids, motion_times):
-        """取 SoftSONIC 的逐帧额外字段（柔顺目标 + 要回放的外力）。
+    def get_motion_softsonic(self, motion_ids, motion_steps):
+        """取 SoftSONIC 的逐帧额外字段（柔顺目标 q_aug + 要回放的外力）。
 
-        索引方式与 ``get_motion_actions`` 完全一致：取 frame_idx0（不插值）。
-        外力和 body id 不能线性插值，所以这里刻意不做 blend。
+        刻意采用 ``get_body_quat_w`` 那样的**按步直接索引**，而不是
+        ``get_motion_actions`` 的 times+frame_blend 模式：TrackingCommand 手里拿的
+        本来就是整数帧号 ``self.time_steps``（它全程只调 ``*_steps`` 系的访问器），
+        绕一趟秒→floor 只会引入浮点 off-by-one。
+
+        也刻意不做任何插值 —— 外力与 force_body_id 是分段常量，插值没有物理意义。
+
+        Args:
+            motion_ids: 动作索引，形状 (N,)
+            motion_steps: 帧号（target_fps 下的整数步），形状 (N,)
 
         Returns:
-            torch.Tensor: (len(motion_ids), SOFTSONIC_WIDTH)，列布局见
-            模块顶部的 ``SOFTSONIC_SLICES``。
+            torch.Tensor: (N, SOFTSONIC_WIDTH)，列布局见模块顶部 ``SOFTSONIC_SLICES``。
         """
         if not self.has_softsonic:
             raise RuntimeError(
                 "动作数据里没有 'softsonic' 字段。用 scripts/cma_to_motionlib.py "
                 "加 --with-softsonic 重新生成。"
             )
-        motion_len = self._motion_lengths[motion_ids]
-        num_frames = self._motion_num_frames[motion_ids]
-        dt = self._motion_dt[motion_ids]
-        frame_idx0, _frame_idx1, _blend = self._calc_frame_blend(
-            motion_times, motion_len, num_frames, dt
-        )
-        f0l = frame_idx0 + self.length_starts[motion_ids]
-        return self._motion_softsonic[f0l]
+        return self._motion_softsonic[motion_steps + self.length_starts[motion_ids]]
 
     def get_time_step_total(self, motion_ids):
         return self._motion_num_frames[motion_ids]
@@ -2211,9 +2211,22 @@ class MotionLibBase:
                 if self.has_action:
                     curr_motion.action = to_torch(curr_file["action"]).clone()[start:end]
                 if self.has_softsonic:
-                    curr_motion.softsonic = to_torch(
-                        curr_file[SOFTSONIC_FIELD]
-                    ).clone()[start:end]
+                    raw_ss = to_torch(curr_file[SOFTSONIC_FIELD]).clone()[start:end]
+                    # 必须重采样到与 fk_batch 输出相同的帧数。curr_file 里的字段是
+                    # 源 fps（CMA 输出 30Hz），而 global_rotation 已被 fk_batch 重采样到
+                    # target_fps（50Hz）；length_starts 是按重采样后的帧数累加的，
+                    # 不对齐的话 get_motion_softsonic 会索引越界。
+                    n_tgt = curr_motion.global_rotation.shape[0]
+                    if raw_ss.shape[0] != n_tgt:
+                        # 刻意用最近邻：外力和 force_body_id 是分段常量，插值没有物理
+                        # 意义；q_aug 在 30->50Hz 下最近邻最多带来 1/60s≈17ms 的陈旧，
+                        # 相对 200-1000ms 的力斜坡时长可以接受。若将来需要更精细，
+                        # 改成 trans/dof 线性插值 + 四元数 slerp + 力/id 仍最近邻。
+                        src_idx = torch.linspace(
+                            0, raw_ss.shape[0] - 1, n_tgt, device=raw_ss.device
+                        ).round().long()
+                        raw_ss = raw_ss[src_idx]
+                    curr_motion.softsonic = raw_ss
 
                 # Extract hand DOFs if motion file has more than 29 DOFs
                 hand_dof_count = self.m_cfg.get("hand_dof_count", 0)
