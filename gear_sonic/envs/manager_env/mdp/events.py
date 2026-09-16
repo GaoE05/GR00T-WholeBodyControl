@@ -220,9 +220,16 @@ def replay_softsonic_external_wrench(
         body_id_lut = torch.tensor(ids, dtype=torch.long, device=env.device)
         setattr(env, cache_key, body_id_lut)
 
-    # time_steps 在触发终止与 reset 之间可能刚好等于总帧数，夹一下避免越界
+    # 绝对帧号是 motion_start_time_steps + time_steps。动作可能从随机帧开始
+    # （TrackingCommand._resample_command 里 sample_time_steps），只用 time_steps
+    # 会让回放的力与 q_aug 错位 —— 评估时起始帧恒为 0 所以看不出来，训练时才炸。
+    # 另外在触发终止与 reset 之间该值可能刚好等于总帧数，夹一下避免越界。
     total = motion_lib.get_time_step_total(command.motion_ids)
-    steps = torch.clamp(command.time_steps, torch.zeros_like(total), total - 1)
+    steps = torch.clamp(
+        command.motion_start_time_steps + command.time_steps,
+        torch.zeros_like(total),
+        total - 1,
+    )
 
     ss = motion_lib.get_motion_softsonic(command.motion_ids, steps)
     sl = _mlb.SOFTSONIC_SLICES

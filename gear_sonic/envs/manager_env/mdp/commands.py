@@ -2231,6 +2231,69 @@ class TrackingCommand(CommandTerm):
             self.motion_ids, self.motion_start_time_steps + self.time_steps
         )[:, self.vr_3point_body_indices_motion]
 
+    # ── SoftSONIC：柔顺监督目标 q_aug 的参考量 ───────────────────────────────
+    # 与上面 q_ref 的同名属性逐行镜像，只把 get_body_*_w 换成 get_body_*_w_aug。
+    # 数据来自加载时对 pose_aa_aug 跑的第二次 fk_batch，见
+    # motion_lib_base.get_body_pos_w_aug 的文档。
+
+    @property
+    def body_pos_w_aug(self) -> torch.Tensor:
+        """柔顺目标的连杆世界位置，形状 (num_envs, num_bodies, 3)。"""
+        return (
+            self.motion_lib.get_body_pos_w_aug(
+                self.motion_ids, self.motion_start_time_steps + self.time_steps
+            )
+            + self._env.scene.env_origins[:, None, :]
+        )
+
+    @property
+    def body_quat_w_aug(self) -> torch.Tensor:
+        """柔顺目标的连杆世界朝向（wxyz），形状 (num_envs, num_bodies, 4)。"""
+        return self.motion_lib.get_body_quat_w_aug(
+            self.motion_ids, self.motion_start_time_steps + self.time_steps
+        )
+
+    @property
+    def anchor_pos_w_aug(self) -> torch.Tensor:
+        """柔顺目标的 anchor 世界位置，形状 (num_envs, 3)。"""
+        return (
+            self.motion_lib.get_body_pos_w_aug(
+                self.motion_ids, self.motion_start_time_steps + self.time_steps
+            )[:, self.motion_anchor_body_index]
+            + self._env.scene.env_origins
+        )
+
+    @property
+    def anchor_quat_w_aug(self) -> torch.Tensor:
+        """柔顺目标的 anchor 世界朝向（wxyz），形状 (num_envs, 4)。"""
+        return self.motion_lib.get_body_quat_w_aug(
+            self.motion_ids, self.motion_start_time_steps + self.time_steps
+        )[:, self.motion_anchor_body_index]
+
+    @property
+    def reward_point_body_quat_w_aug(self) -> torch.Tensor:
+        return self.motion_lib.get_body_quat_w_aug(
+            self.motion_ids, self.motion_start_time_steps + self.time_steps
+        )[:, self.reward_point_body_indices_motion]
+
+    @property
+    def reward_point_body_pos_w_aug(self) -> torch.Tensor:
+        """柔顺目标的 reward 点位置（含偏移），形状 (num_envs, n_points, 3)。
+
+        偏移用**柔顺目标自己的**朝向旋转，与 q_ref 版用 q_ref 朝向相对应 ——
+        手腕转了，掌心偏移的方向也该跟着转。
+        """
+        reward_point_original = self.motion_lib.get_body_pos_w_aug(
+            self.motion_ids, self.motion_start_time_steps + self.time_steps
+        )[:, self.reward_point_body_indices_motion]
+        return (
+            reward_point_original
+            + quat_apply(self.reward_point_body_quat_w_aug, self.reward_point_body_offsets)
+            + self._env.scene.env_origins[:, None, :]
+        )
+
+    # ── /SoftSONIC ───────────────────────────────────────────────────────────
+
     @property
     def reward_point_body_quat_w(self) -> torch.Tensor:
         return self.motion_lib.get_body_quat_w(
