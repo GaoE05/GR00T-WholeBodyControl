@@ -28,6 +28,49 @@ class FixHeightMode(enum.Enum):
     ankle_fix = 2
 
 
+# ── SoftSONIC ─────────────────────────────────────────────────────────────────
+# 额外的逐帧字段 "softsonic"，携带柔顺增强的监督目标与要回放的外力。
+# 完全照 "action" 字段的模式接线，以便复用已有的帧索引与 30→50Hz 重采样逻辑。
+#
+# 形状 (T, 43)，列布局：
+#     [ 0: 3]  增强后根平移 q_aug
+#     [ 3: 7]  增强后根旋转 q_aug（四元数 xyzw）
+#     [ 7:36]  增强后关节角 q_aug（29，MuJoCo 顺序）
+#     [36:39]  要施加的外力 F（世界系，N）
+#     [39:42]  要施加的外力矩 tau（N·m）
+#     [42:43]  受力连杆的**规范索引**，见下方 SOFTSONIC_FORCE_BODIES（-1 = 无目标连杆）
+#
+# 陷阱：[42:43] >= 0 **不代表该帧真的在施力**。CMA 存的 link_id 取自
+# `current_event if current_event else event_queue[0]`（runner.py:405-407），
+# 也就是包含尚未开始的排队事件 —— 实测 99% 的帧 id >= 0，但只有 66% 的帧 |F| > 1N。
+# **判断是否在施力一律用 ‖ext_force‖，不要用 body id。**
+#
+# 刻意不存 body id：CMA 的 id 来自 SoftMimic 的 MJCF，而训练时在 Isaac Lab 里用的是
+# SONIC 自己的 G1 资产，两者 body 索引不同。存规范索引，运行时各自查名字。
+#
+# 注意外力必须与生成 q_aug 时所用的力逐帧一致，否则 q_aug 不是正确的监督目标 ——
+# 这就是为什么力要从数据里回放而不是在仿真里独立采样。
+SOFTSONIC_FIELD = "softsonic"
+SOFTSONIC_WIDTH = 43
+# 可受力连杆的规范顺序（SoftMimic constants.py 的 FORCEABLE_LINKS 与
+# DOWNWARD_ONLY_FORCEABLE_LINKS 之并集）。索引写进数据，名字在运行时解析。
+SOFTSONIC_FORCE_BODIES = [
+    "left_wrist_yaw_link",
+    "right_wrist_yaw_link",
+    "torso_link",
+    "left_shoulder_pitch_link",
+    "right_shoulder_pitch_link",
+]
+SOFTSONIC_SLICES = {
+    "aug_root_trans": slice(0, 3),
+    "aug_root_quat_xyzw": slice(3, 7),
+    "aug_dof": slice(7, 36),
+    "ext_force": slice(36, 39),
+    "ext_torque": slice(39, 42),
+    "force_body_id": slice(42, 43),
+}
+# ──────────────────────────────────────────────────────────────────────────────
+
 class MotionlibMode(enum.Enum):
     file = 1
     directory = 2
@@ -230,6 +273,7 @@ class MotionLibBase:
         self._device = device
         self.mesh_parsers = None
         self.has_action = False
+        self.has_softsonic = False
         skeleton_file = Path(self.m_cfg.asset.assetRoot) / self.m_cfg.asset.assetFileName
         self.skeleton_tree = skeleton.SkeletonTree.from_mjcf(skeleton_file)
         logger.info(f"Loaded skeleton from {skeleton_file}")
@@ -545,6 +589,30 @@ class MotionLibBase:
 
         action = self._motion_actions[f0l]
         return action
+
+    def get_motion_softsonic(self, motion_ids, motion_times):
+        """取 SoftSONIC 的逐帧额外字段（柔顺目标 + 要回放的外力）。
+
+        索引方式与 ``get_motion_actions`` 完全一致：取 frame_idx0（不插值）。
+        外力和 body id 不能线性插值，所以这里刻意不做 blend。
+
+        Returns:
+            torch.Tensor: (len(motion_ids), SOFTSONIC_WIDTH)，列布局见
+            模块顶部的 ``SOFTSONIC_SLICES``。
+        """
+        if not self.has_softsonic:
+            raise RuntimeError(
+                "动作数据里没有 'softsonic' 字段。用 scripts/cma_to_motionlib.py "
+                "加 --with-softsonic 重新生成。"
+            )
+        motion_len = self._motion_lengths[motion_ids]
+        num_frames = self._motion_num_frames[motion_ids]
+        dt = self._motion_dt[motion_ids]
+        frame_idx0, _frame_idx1, _blend = self._calc_frame_blend(
+            motion_times, motion_len, num_frames, dt
+        )
+        f0l = frame_idx0 + self.length_starts[motion_ids]
+        return self._motion_softsonic[f0l]
 
     def get_time_step_total(self, motion_ids):
         return self._motion_num_frames[motion_ids]
@@ -1042,6 +1110,7 @@ class MotionLibBase:
         _motion_aa = []
         has_action = False  # noqa: F841
         _motion_actions = []
+        _motion_softsonic = []
         _motion_smpl_poses = []
         _motion_smpl_joints = []
         _motion_smpl_transl = []
@@ -1347,6 +1416,8 @@ class MotionLibBase:
             _motion_lengths.append(curr_len)
             if self.has_action:
                 _motion_actions.append(curr_motion.action)
+            if self.has_softsonic:
+                _motion_softsonic.append(curr_motion.softsonic)
             if self.smpl_data is not None:
                 _motion_smpl_poses.append(curr_motion["smpl_pose"])
                 if "smpl_joints" in curr_motion:
@@ -1474,6 +1545,10 @@ class MotionLibBase:
 
         if self.has_action:
             self._motion_actions = torch.cat(_motion_actions, dim=0).float().to(self._device)
+        if self.has_softsonic:
+            self._motion_softsonic = (
+                torch.cat(_motion_softsonic, dim=0).float().to(self._device)
+            )
         self._num_motions = len(motions)
 
         self.body_pos_w = (
@@ -1773,6 +1848,14 @@ class MotionLibBase:
             # import ipdb; ipdb.set_trace()
             if "action" in curr_file.keys():  # noqa: SIM118
                 self.has_action = True
+            if SOFTSONIC_FIELD in curr_file.keys():  # noqa: SIM118
+                if not self.has_softsonic:
+                    logger.info(
+                        f"SoftSONIC: 检测到 '{SOFTSONIC_FIELD}' 逐帧字段 "
+                        f"(shape {tuple(curr_file[SOFTSONIC_FIELD].shape)})，"
+                        "柔顺目标与回放外力可用"
+                    )
+                self.has_softsonic = True
 
             if "fps" not in curr_file.keys():  # noqa: SIM118
                 curr_file["fps"] = 30.0
@@ -2127,6 +2210,10 @@ class MotionLibBase:
                 # add "action" to curr_motion
                 if self.has_action:
                     curr_motion.action = to_torch(curr_file["action"]).clone()[start:end]
+                if self.has_softsonic:
+                    curr_motion.softsonic = to_torch(
+                        curr_file[SOFTSONIC_FIELD]
+                    ).clone()[start:end]
 
                 # Extract hand DOFs if motion file has more than 29 DOFs
                 hand_dof_count = self.m_cfg.get("hand_dof_count", 0)
