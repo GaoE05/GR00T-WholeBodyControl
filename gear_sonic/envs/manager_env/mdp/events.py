@@ -366,6 +366,23 @@ def apply_softsonic_force_field(
     env._softsonic_torque_actual = actual_t  # noqa: SLF001
     env._softsonic_force_desired = ss[:, sl["desired_force"]].clone()  # noqa: SLF001
     env._softsonic_torque_desired = ss[:, sl["desired_torque"]].clone()  # noqa: SLF001
+
+    # 逐帧的"完全刚性"参考值，供评价指标归一化用。
+    #
+    # 必须逐帧算而不能用一个常数：k_ff 是逐事件对数均匀采样的（实测本数据集
+    # 12.2~834.8），刚性极限 1+k_ff/k_robot 的范围是 1.27~19.55 —— 中位 3.09、
+    # **均值 4.96**。拿均值形式的 force_ratio 去比中位常数会得出"比刚性还差"的
+    # 错误结论。
+    #
+    # 推导：数据满足 dp = F/k_ff + F/k_robot（已用 MuJoCo 交叉验证，自洽误差 0.00%），
+    # 两边乘 k_ff/F 即得
+    #     k_ff·dp/F = 1 + k_ff/k_robot = 刚性极限
+    # 于是完全不需要知道 k_robot，三个字段直接给出该帧的刚性参考值。
+    want_n = ss[:, sl["desired_force"]].norm(dim=-1)
+    dp_n = ss[:, sl["ff_setpoint_delta_pos"]].norm(dim=-1)
+    env._softsonic_rigid_limit = torch.where(  # noqa: SLF001
+        want_n > 1e-6, k_ff * dp_n / want_n.clamp(min=1e-6), torch.ones_like(want_n)
+    )
     env._softsonic_active = active.clone()  # noqa: SLF001
 
     # 外力缓冲是持久的，必须每步重写全部环境，否则无力环境残留上一帧

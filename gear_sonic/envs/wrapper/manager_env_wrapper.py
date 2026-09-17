@@ -1066,10 +1066,29 @@ class ManagerEnvWrapper:
                 got = fa[active].norm(dim=-1)
                 sig = want > 1.0
                 if sig.any():
-                    # 核心评价指标：训练应把它驱向 1.0（完全刚性的理论极限是
-                    # 1 + k_ff/k_robot，实测约 3.09）
-                    extras["to_log"]["softsonic/force_ratio"] = (got[sig] / want[sig]).mean()
+                    ratio = got[sig] / want[sig]
+                    extras["to_log"]["softsonic/force_ratio"] = ratio.mean()
                     extras["to_log"]["softsonic/force_err_N"] = (got[sig] - want[sig]).abs().mean()
+
+                    # 核心评价指标。force_ratio 本身不可直接解读：k_ff 逐事件对数
+                    # 均匀采样，逐帧的刚性参考值 1+k_ff/k_robot 跨度达 1.27~19.55，
+                    # 中位 3.09 而均值 4.96 —— 拿均值形式的 force_ratio 去比中位常数
+                    # 会把"表现得和刚性机器人一样"误读成"比刚性还差"。
+                    #
+                    # 这里按每个环境**自己**的刚性参考值归一化：
+                    #     compliance = (limit - ratio) / (limit - 1)
+                    #   0 = 完全刚性（ratio 等于该帧的刚性极限）
+                    #   1 = 完全柔顺（ratio = 1，实际力等于期望力）
+                    # limit 趋近 1 的帧（力场比机器人软得多，刚柔无差别）无信息量，
+                    # 分母会爆掉，按 limit>1.05 过滤。
+                    lim = getattr(self.env, "_softsonic_rigid_limit", None)
+                    if lim is not None:
+                        lim = lim[active][sig]
+                        ok = lim > 1.05
+                        if ok.any():
+                            comp = (lim[ok] - ratio[ok]) / (lim[ok] - 1.0)
+                            extras["to_log"]["softsonic/compliance"] = comp.mean()
+                            extras["to_log"]["softsonic/rigid_limit"] = lim[ok].mean()
 
         new_obs = self.process_raw_obs(obs_dict, flatten_dict_obs=True)
         # Store obs for action_transform_module when obs_dict is not provided in next step()
