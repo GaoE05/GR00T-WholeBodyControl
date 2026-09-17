@@ -1,0 +1,29 @@
+# SoftSONIC 的 critic 观测：在发布配置 privileged_mf_hist 的基础上补四项外力特权量。
+#
+# 为什么必须补：力场是我们新加的环境动力学，而原 critic 组对它一无所知。价值函数
+# 无法解释"为什么这条轨迹回报低"，只能把外力当噪声，优势估计因此带上大量不可约
+# 方差 —— k39lnrxc 里 loss/value_avg≈2.0 长期主导 weighted_ppo_loss 就是这个症状。
+#
+# 划分严格照搬 SoftMimic 的 g1_force_control.py:264-309：外力只进 critic，策略组里
+# force_applied / torque_applied 一律为 None。这是真机可行性的要求，不是简化 ——
+# 部署时机器人并没有外力传感器，柔顺必须从本体感知推断出来。
+#
+# 未加 desired_stiffness_log（SoftMimic 放在**策略**组里的那项）：它表示"要多柔顺"，
+# 而我们用 scripts/cma_fixed_stiffness.py 把 k_robot 钉死在 45 N/m，该量恒为常数、
+# 不携带任何信息。等将来放开机器人刚度做条件化柔顺时再加。
+
+defaults:
+  - privileged_mf_hist@_here_
+  - ../terms/softsonic_force_applied@_here_
+  - ../terms/softsonic_torque_applied@_here_
+  - ../terms/softsonic_force_desired@_here_
+  - ../terms/softsonic_ff_stiffness_log@_here_
+
+softsonic_force_applied:
+  history_length: ${critic_prop_history_length}
+softsonic_torque_applied:
+  history_length: ${critic_prop_history_length}
+softsonic_force_desired:
+  history_length: ${critic_prop_history_length}
+softsonic_ff_stiffness_log:
+  history_length: ${critic_prop_history_length}

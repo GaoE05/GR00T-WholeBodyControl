@@ -1,0 +1,5 @@
+# SoftSONIC：实际施加的外力矩。仅供 critic。
+# 对照 SoftMimic g1_force_control.py:289（critic.torque_applied）。
+softsonic_torque_applied:
+  _target_: isaaclab.managers.ObservationTermCfg
+  func: gear_sonic.envs.manager_env.mdp:softsonic_torque_applied

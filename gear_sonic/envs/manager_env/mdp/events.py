@@ -384,6 +384,7 @@ def apply_softsonic_force_field(
         want_n > 1e-6, k_ff * dp_n / want_n.clamp(min=1e-6), torch.ones_like(want_n)
     )
     env._softsonic_active = active.clone()  # noqa: SLF001
+    env._softsonic_k_ff = k_ff.clone()  # noqa: SLF001  critic 特权观测用
 
     # 外力缓冲是持久的，必须每步重写全部环境，否则无力环境残留上一帧
     robot.permanent_wrench_composer.set_forces_and_torques(

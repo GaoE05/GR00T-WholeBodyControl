@@ -280,6 +280,10 @@ class TeacherCfg(ObsGroup):
 @configclass
 class PrivilegedCfg(ObsGroup):
     """Privileged observations for the critic network (asymmetric actor-critic)."""
+    softsonic_force_applied = None
+    softsonic_torque_applied = None
+    softsonic_force_desired = None
+    softsonic_ff_stiffness_log = None
 
     command = None
     command_max = None
@@ -481,6 +485,54 @@ class ObservationsCfg:
     teacher: TeacherCfg = None  # Teacher observations for distillation
     camera_rgb: CameraRGBCfg = None  # Separate vision observation group
     residual_action: ResidualAction = None
+
+
+# ── SoftSONIC：critic 的特权外力观测 ──────────────────────────────────────────
+# 对照 SoftMimic 的 g1_force_control.py:282-309，它给 critic 加了 force_applied /
+# torque_applied / forcefield_stiffness_log / forcefield_force_desired，而**策略组**
+# 里这些一律为 None（force_applied=None, torque_applied=None）。我们沿用同样的划分：
+# 外力只进 critic，策略必须从本体感知推断 —— 真机上也拿不到这些量。
+#
+# 不给 critic 看外力的后果是它无法解释回报的差异，只能把外力当噪声，价值函数因此
+# 带上大量不可约方差（k39lnrxc 里 loss/value_avg≈2.0 主导总损失）。
+#
+# 这些缓冲由 events.apply_softsonic_force_field 每步写入。IsaacLab 的顺序是
+# 事件 -> 下一步的观测计算，所以读到的是当步实际施加的力。力场未启用或首步时
+# 缓冲不存在，一律返回零，形状保持不变。
+
+
+def _softsonic_buffer(env: ManagerBasedEnv, name: str, dim: int) -> torch.Tensor:
+    buf = getattr(env, name, None)
+    if buf is None:
+        return torch.zeros(env.num_envs, dim, device=env.device)
+    return buf.view(env.num_envs, -1)
+
+
+def softsonic_force_applied(env: ManagerBasedEnv) -> torch.Tensor:
+    """实际施加在受力连杆上的外力（世界系），形状 (num_envs, 3)。"""
+    return _softsonic_buffer(env, "_softsonic_force_actual", 3)
+
+
+def softsonic_torque_applied(env: ManagerBasedEnv) -> torch.Tensor:
+    """实际施加的外力矩（世界系），形状 (num_envs, 3)。"""
+    return _softsonic_buffer(env, "_softsonic_torque_actual", 3)
+
+
+def softsonic_force_desired(env: ManagerBasedEnv) -> torch.Tensor:
+    """该帧的期望交互力（数据给出），形状 (num_envs, 3)。"""
+    return _softsonic_buffer(env, "_softsonic_force_desired", 3)
+
+
+def softsonic_ff_stiffness_log(env: ManagerBasedEnv) -> torch.Tensor:
+    """力场刚度的对数，形状 (num_envs, 1)。
+
+    取对数是因为 k_ff 在生成时就是**对数均匀**采样的（实测跨度 12.2~834.8），
+    线性尺度下量纲差两个数量级，会压垮网络输入的归一化。SoftMimic 同样用
+    desired_stiffness_log / forcefield_stiffness_log 而非线性值。
+    无力场的帧 k_ff=0，取 log1p 保证在 0 处有定义且单调。
+    """
+    k = _softsonic_buffer(env, "_softsonic_k_ff", 1)
+    return torch.log1p(k.clamp(min=0.0))
 
 
 def command_max(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:

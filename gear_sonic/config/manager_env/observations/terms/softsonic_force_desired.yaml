@@ -1,0 +1,5 @@
+# SoftSONIC：该帧的期望交互力（数据给出，即完全柔顺时应感受到的力）。仅供 critic。
+# 对照 SoftMimic g1_force_control.py:305（critic.forcefield_force_desired）。
+softsonic_force_desired:
+  _target_: isaaclab.managers.ObservationTermCfg
+  func: gear_sonic.envs.manager_env.mdp:softsonic_force_desired

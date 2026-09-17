@@ -1,0 +1,6 @@
+# SoftSONIC：力场刚度的对数。仅供 critic。
+# 取对数而非线性值：k_ff 生成时即对数均匀采样（实测跨度 12.2~834.8）。
+# 对照 SoftMimic g1_force_control.py:295（critic.forcefield_stiffness_log）。
+softsonic_ff_stiffness_log:
+  _target_: isaaclab.managers.ObservationTermCfg
+  func: gear_sonic.envs.manager_env.mdp:softsonic_ff_stiffness_log

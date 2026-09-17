@@ -29,7 +29,10 @@ defaults:
   - override /actor_critic: mlp
   - override /manager_env/observations/tokenizer: unitoken_all_noz
   - override /manager_env/observations/policy: local_dir_hist
-  - override /manager_env/observations/critic: privileged_mf_hist
+  # critic 补四项外力特权观测。力场是我们新加的动力学，原 critic 组对它一无所知，
+  # 价值函数只能把外力当噪声。划分照搬 SoftMimic g1_force_control.py:264-309：
+  # 外力只进 critic，策略必须从本体感知推断（真机没有外力传感器）。
+  - override /manager_env/observations/critic: privileged_mf_hist_softsonic
   - override /manager_env/events: tracking/softsonic
   - override /manager_env/terminations: tracking/softsonic
   - override /manager_env/rewards: tracking/softsonic

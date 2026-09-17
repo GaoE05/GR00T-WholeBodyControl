@@ -1,0 +1,5 @@
+# SoftSONIC：实际施加的外力。仅供 critic —— 真机上拿不到，策略必须从本体感知推断。
+# 对照 SoftMimic g1_force_control.py:283（critic.force_applied）。
+softsonic_force_applied:
+  _target_: isaaclab.managers.ObservationTermCfg
+  func: gear_sonic.envs.manager_env.mdp:softsonic_force_applied
