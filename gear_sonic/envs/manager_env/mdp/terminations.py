@@ -487,3 +487,74 @@ class CummBodyOriErrorLocal(_CummErrorMixin):
         return self._update_counters()
 
 
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SoftSONIC：对柔顺目标 q_aug 的偏离判据
+#
+# 发布配置实际启用的是 anchor_pos_adaptive / ee_body_pos_adaptive，它们分别指向
+# exceeded_anchor_height 与 exceeded_body_height —— **只查 Z 高度误差**（不是 3D
+# 距离），阈值 0.15m（参考根部低于 root_height_threshold 时放宽到 down_threshold）。
+# 所以这里镜像的是高度版而非距离版，签名也带上自适应参数。
+#
+# 为什么必须改成对 q_aug：K=45N/m 下柔顺目标的手腕 3D 退让中位 0.24m、p90 0.44m，
+# 力方向在单位球上均匀采样，Z 分量经常远超 0.15m —— 正确的柔顺行为会被判死。
+# SoftMimic 论文的 no-aug 消融原文：'successful compliance generates a large
+# tracking error relative to q_ref, which would normally trigger an early
+# termination'，其解法是修改终止条件，结果得到不可预测的姿态；我们改成对 q_aug
+# 计算，阈值语义回到"跟踪得好不好"，可以沿用原数值。
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def exceeded_compliant_anchor_height(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    threshold: float,
+    threshold_adaptive: bool = False,
+    down_threshold: float = 0.5,
+    root_height_threshold: float = 1.0,
+) -> torch.Tensor:
+    """anchor 高度偏离柔顺目标 q_aug 超阈值则终止（镜像 exceeded_anchor_height）。"""
+    command: TrackingCommand = env.command_manager.get_term(command_name)
+    height_diff = (command.anchor_pos_w_aug[:, 2] - command.robot_anchor_pos_w[:, 2]).abs()
+    if threshold_adaptive:
+        thresh = torch.full_like(height_diff, threshold)
+        thresh[command.running_ref_root_height < root_height_threshold] = down_threshold
+        return height_diff.gt(thresh)
+    return height_diff.gt(threshold)
+
+
+def exceeded_compliant_body_height(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    threshold: float,
+    threshold_adaptive: bool = False,
+    down_threshold: float = 0.5,
+    body_names: list[str] | None = None,
+    root_height_threshold: float = 0.5,
+) -> torch.Tensor:
+    """连杆高度偏离柔顺目标 q_aug 超阈值则终止（镜像 exceeded_body_height）。"""
+    from gear_sonic.envs.manager_env.mdp.rewards import _compliant_relative_ref
+
+    command: TrackingCommand = env.command_manager.get_term(command_name)
+    tracked = _get_body_indexes(command, body_names)
+    pos_rel, _ = _compliant_relative_ref(command)
+    height_err = (pos_rel[:, tracked, 2] - command.robot_body_pos_w[:, tracked, 2]).abs()
+    if threshold_adaptive:
+        thresh = torch.full_like(height_err, threshold)
+        thresh[command.running_ref_root_height < root_height_threshold] = down_threshold
+        return height_err.gt(thresh).any(dim=-1)
+    return height_err.gt(threshold).any(dim=-1)
+
+
+def exceeded_compliant_anchor_ori(
+    env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, command_name: str, threshold: float
+) -> torch.Tensor:
+    """anchor 朝向偏离柔顺目标 q_aug 超阈值则终止（镜像 exceeded_anchor_ori）。
+
+    与上游一致：``asset_cfg`` 未被使用但终止项 API 要求带上；比较的是**平方**误差
+    （阈值单位是 rad²，发布配置给的是 1）。
+    """
+    command: TrackingCommand = env.command_manager.get_term(command_name)
+    angular_err = quat_error_magnitude(command.anchor_quat_w_aug, command.robot_anchor_quat_w)
+    return angular_err.square().gt(threshold)

@@ -1,0 +1,6 @@
+applied_torque_tracking:
+  _target_: isaaclab.managers.RewardTermCfg
+  func: gear_sonic.envs.manager_env.mdp:applied_torque_tracking_error
+  weight: 2.0
+  params:
+    std: 2.0

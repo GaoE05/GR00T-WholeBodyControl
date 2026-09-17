@@ -1,0 +1,6 @@
+# 存活奖励。SONIC 发布配置没有这一项；把终止判据改瞄 q_aug 后，探索期需要它托底，
+# 否则策略容易学成提前终止来规避负项。权重取自 SoftMimic Table VI。
+alive:
+  _target_: isaaclab.managers.RewardTermCfg
+  func: gear_sonic.envs.manager_env.mdp:alive
+  weight: 1.5

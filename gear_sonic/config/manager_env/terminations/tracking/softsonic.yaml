@@ -1,0 +1,46 @@
+# =============================================================================
+# SoftSONIC 的终止组合
+# =============================================================================
+#
+# 实际启用的 anchor_pos_adaptive / ee_body_pos_adaptive 查的是 **Z 高度误差**
+# （exceeded_anchor_height / exceeded_body_height），阈值 0.15m。而 K=45N/m 下
+# 柔顺目标的手腕 3D 退让中位 0.24m、p90 0.44m，力方向在单位球上均匀采样，
+# Z 分量经常远超 0.15m —— 正确的柔顺行为会被判死。
+#
+# 阈值必须显式写出：发布用的组合 base_adaptive_strict_ori_foot_xyz 把它们从项文件
+# 的默认值 0.5 覆写到 0.15，只改 func 不带 params 会静默继承 0.5，判据被放宽 3 倍。
+# 下面的数值逐一对应该组合，threshold_adaptive / down_threshold 等其余参数仍沿用
+# *_adaptive 项自带的。
+#
+# 解法不是放宽阈值，而是把偏离量改成对 q_aug 计算：这样阈值的语义回到"跟踪得
+# 好不好"，可以沿用原数值。SoftMimic 论文的 no-aug 消融正是因为只能放宽/修改
+# 终止条件而得到不可预测的姿态。
+# =============================================================================
+
+defaults:
+  - terms/anchor_pos_adaptive@_here_
+  - terms/anchor_ori_full@_here_
+  - terms/ee_body_pos_adaptive@_here_
+  - terms/motion_time_out@_here_
+  - terms/foot_pos_xyz@_here_
+
+_target_: gear_sonic.envs.manager_env.mdp.terminations.TerminationsCfg
+
+anchor_pos:
+  func: gear_sonic.envs.manager_env.mdp:exceeded_compliant_anchor_height
+  params:
+    threshold: 0.15
+anchor_ori_full:
+  func: gear_sonic.envs.manager_env.mdp:exceeded_compliant_anchor_ori
+  params:
+    threshold: 0.2
+ee_body_pos:
+  func: gear_sonic.envs.manager_env.mdp:exceeded_compliant_body_height
+  params:
+    threshold: 0.15
+# 脚的判据保持对 q_ref：CMA 的 IK 用高权重（2.5）约束站立脚与参考一致，且可行性
+# 判据要求偏离 ≤0.05m，所以 q_aug 的脚本来就该贴着 q_ref。这一项继续当作"没站稳"
+# 的检测，不改。
+foot_pos_xyz:
+  params:
+    threshold: 0.2

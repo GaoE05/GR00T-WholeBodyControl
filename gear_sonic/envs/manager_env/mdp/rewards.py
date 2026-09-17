@@ -56,6 +56,13 @@ class RewardsCfg:
     is_terminated = None
     upright_penalty = None
 
+    # ── SoftSONIC ───────────────────────────────────────────────────────────
+    # 对 q_aug 的跟踪项复用上面已有的项名（tracking_* 系列），只在配置里把 func
+    # 指向 tracking_compliant_* 版本，因此不需要新字段。下面三项是真正新增的。
+    applied_force_tracking = None
+    applied_torque_tracking = None
+    alive = None
+
 
 def tracking_anchor_pos_error(
     env: ManagerBasedRLEnv, command_name: str, std: float
@@ -605,3 +612,194 @@ def anti_shake_ang_vel_l2(
     excess = torch.relu(speed - threshold)
     penalty = (excess * excess).mean(dim=-1)
     return penalty
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SoftSONIC：对柔顺目标 q_aug 的跟踪，以及力/力矩跟踪
+#
+# 设计依据（SoftMimic 论文 III-B 原文）：
+#   "the robot observes the original motion target but is rewarded for inferring
+#    the force interaction and matching the applicable augmented target"
+# 即观测原始参考（真机可得），奖励对齐增强参考（离线 IK 的产物，仅训练时可用）。
+#
+# q_aug 在无外力时严格等于 q_ref（实测无力帧关节偏差中位 0.000°），所以把跟踪目标
+# 整体从 q_ref 换成 q_aug 是安全的，不会在无力时改变行为 —— 也正因如此，不能采用
+# "保留 q_ref 奖励再叠加 q_aug 奖励"的做法，那会在有力时制造拉锯，正是 SoftMimic
+# 论文指出的 "a purely stiff tracker is a strong local optimum" 陷阱。
+#
+# 权重取自 SoftMimic Table VI，逐项对照见 notes/reward-mapping.md。
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def _compliant_relative_ref(command: TrackingCommand):
+    """把柔顺目标 q_aug 的连杆位姿重锚到机器人当前 anchor，与 q_ref 侧同一套变换。
+
+    复刻 ``TrackingCommand`` 里 ``body_pos_relative_w`` 的算法，只把 ``body_pos_w``
+    换成 ``body_pos_w_aug``。
+
+    **关键**：减去的仍是 ``anchor_pos_w``（q_ref 的 anchor），不是 q_aug 自己的。
+    用 q_ref 的 anchor 才能把 ``q_aug - q_ref`` 这个柔顺位移原样保留下来；若用
+    q_aug 自己的 anchor，骨盆的柔顺平移会被抵消掉，机器人就不会被奖励去移动骨盆。
+
+    Returns:
+        (pos_rel_aug, quat_rel_aug)，形状分别为 (E, B, 3) 和 (E, B, 4)。
+    """
+    from gear_sonic.trl.utils import torch_transform
+
+    n_bodies = len(command.cfg.body_names)
+    anchor_pos_rep = command.anchor_pos_w[:, None, :].repeat(1, n_bodies, 1)
+    anchor_quat_rep = command.anchor_quat_w[:, None, :].repeat(1, n_bodies, 1)
+    robot_anchor_pos_rep = command.robot_anchor_pos_w[:, None, :].repeat(1, n_bodies, 1)
+    robot_anchor_quat_rep = command.robot_anchor_quat_w[:, None, :].repeat(1, n_bodies, 1)
+
+    delta_pos_w = robot_anchor_pos_rep.clone()
+    delta_pos_w[..., 2] = anchor_pos_rep[..., 2]
+    delta_ori_w = torch_transform.get_heading_q(
+        quat_mul(robot_anchor_quat_rep, quat_inv(anchor_quat_rep))
+    )
+    pos_rel = delta_pos_w + quat_apply(delta_ori_w, command.body_pos_w_aug - anchor_pos_rep)
+    quat_rel = quat_mul(delta_ori_w, command.body_quat_w_aug)
+    return pos_rel, quat_rel
+
+
+def tracking_compliant_relative_body_pos_error(
+    env: ManagerBasedRLEnv, command_name: str, std: float, body_names: list[str] | None = None
+) -> torch.Tensor:
+    """连杆位置跟踪奖励，目标为柔顺参考 q_aug（对应 q_ref 版的同名奖励）。"""
+    command: TrackingCommand = env.command_manager.get_term(command_name)
+    tracked = _get_body_indexes(command, body_names)
+    pos_rel, _ = _compliant_relative_ref(command)
+    pos_diff = pos_rel[:, tracked] - command.robot_body_pos_w[:, tracked]
+    per_body_err = (pos_diff * pos_diff).sum(dim=-1)
+    return torch.exp(-per_body_err.mean(dim=-1) / (std * std))
+
+
+def tracking_compliant_relative_body_ori_error(
+    env: ManagerBasedRLEnv, command_name: str, std: float, body_names: list[str] | None = None
+) -> torch.Tensor:
+    """连杆朝向跟踪奖励，目标为柔顺参考 q_aug。"""
+    command: TrackingCommand = env.command_manager.get_term(command_name)
+    tracked = _get_body_indexes(command, body_names)
+    _, quat_rel = _compliant_relative_ref(command)
+    err = quat_error_magnitude(quat_rel[:, tracked], command.robot_body_quat_w[:, tracked])
+    return torch.exp(-(err * err).mean(dim=-1) / (std * std))
+
+
+def tracking_compliant_anchor_pos_error(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    """anchor（骨盆）位置跟踪奖励，目标为柔顺参考。
+
+    骨盆位移是全身协同柔顺的关键体现（实测 q_aug 的骨盆中位移动 10.5cm），
+    所以这一项必须瞄 q_aug，否则会与柔顺直接对抗。
+    """
+    command: TrackingCommand = env.command_manager.get_term(command_name)
+    diff = command.anchor_pos_w_aug - command.robot_anchor_pos_w
+    return torch.exp(-(diff * diff).sum(dim=-1) / (std * std))
+
+
+def tracking_compliant_anchor_ori_error(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    """anchor 朝向跟踪奖励，目标为柔顺参考。"""
+    command: TrackingCommand = env.command_manager.get_term(command_name)
+    err = quat_error_magnitude(command.anchor_quat_w_aug, command.robot_anchor_quat_w)
+    return torch.exp(-(err * err) / (std * std))
+
+
+def tracking_compliant_local_vr_5point_error(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    """5 点局部跟踪奖励，目标为柔顺参考（对应 q_ref 版权重 2.0 的主项）。
+
+    与 q_ref 版一样把参考与机器人各自变换到自身 anchor 的局部系再比较；参考侧用
+    q_ref 的 anchor，使 q_aug 相对 q_ref 的位移得以保留。
+    """
+    command: TrackingCommand = env.command_manager.get_term(command_name)
+    n_pts = len(command.cfg.reward_point_body)
+    ref_diff = command.reward_point_body_pos_w_aug - command.anchor_pos_w[:, None, :]
+    ref_quat = command.anchor_quat_w.view(env.num_envs, 1, 4).repeat(1, n_pts, 1)
+    ref_local = quat_apply(quat_inv(ref_quat), ref_diff)
+
+    robot_quat = command.robot_anchor_quat_w.view(env.num_envs, 1, 4).repeat(1, n_pts, 1)
+    robot_diff = command.robot_reward_point_body_pos_w - command.robot_anchor_pos_w[:, None, :]
+    robot_local = quat_apply(quat_inv(robot_quat), robot_diff)
+
+    err = torch.sum(torch.square(robot_local - ref_local), dim=-1)
+    return torch.exp(-err.mean(-1) / (std * std))
+
+
+def _softsonic_wrench_buffers(env: ManagerBasedRLEnv, kind: str):
+    """取事件项写入的实际/期望力（或力矩）缓冲。
+
+    首步返回 None：IsaacLab 的管理器顺序是 终止(204) -> 奖励(208) -> 指令推进(232)
+    -> 事件(235)，所以第一次算奖励时事件项还没跑过，缓冲尚不存在。这与"压根没启用
+    事件项"是两回事，必须区分开 —— 后者是配置错误，静默返回满分会让训练看起来正常
+    却完全没有力信号。
+
+    Returns:
+        (actual, desired, active) 三元组；首步返回 None。
+
+    Raises:
+        RuntimeError: 事件管理器里没有 softsonic_force_field 项（配置错误）。
+    """
+    actual = getattr(env, f"_softsonic_{kind}_actual", None)
+    if actual is not None:
+        return (
+            actual,
+            getattr(env, f"_softsonic_{kind}_desired"),
+            env._softsonic_active,  # noqa: SLF001
+        )
+    terms = getattr(env.event_manager, "active_terms", {})
+    names = set()
+    for v in (terms.values() if isinstance(terms, dict) else [terms]):
+        names.update(v if isinstance(v, (list, tuple)) else [])
+    if "softsonic_force_field" not in names:
+        raise RuntimeError(
+            "力/力矩跟踪奖励要求启用 softsonic_force_field 事件项，但事件管理器里"
+            f"没有它。已启用的事件项：{sorted(names)}。"
+            "加 '+manager_env/events=tracking/softsonic'。"
+        )
+    return None
+
+
+def applied_force_tracking_error(env: ManagerBasedRLEnv, std: float = 20.0) -> torch.Tensor:
+    """交互力跟踪奖励：实际力应接近期望力（SoftMimic Table VI，sigma 20 N，权重 2.0）。
+
+    这一项只有在**力场**设定下才有意义：力由 ``F = k_ff·(设定点 - 手位)`` 决定，
+    机器人靠自身姿态影响它。若改成逐帧回放记录的力，实际力恒等于期望力，本项退化
+    成常数、梯度为零。
+
+    无活跃力场的环境返回 1.0（满分），这样该项不会在休息期产生任何梯度。
+
+    依赖 ``apply_softsonic_force_field`` 事件项写入的缓冲。IsaacLab 的管理器顺序是
+    终止 -> 奖励 -> 指令推进 -> 事件，所以奖励读到的正是本步物理施加的力，无滞后。
+    """
+    buffers = _softsonic_wrench_buffers(env, "force")
+    if buffers is None:   # 首步，事件项尚未跑过
+        return torch.ones(env.num_envs, device=env.device)
+    actual, desired, active = buffers
+    err = (actual - desired).norm(dim=-1)
+    reward = torch.exp(-(err * err) / (std * std))
+    return torch.where(active, reward, torch.ones_like(reward))
+
+
+def applied_torque_tracking_error(env: ManagerBasedRLEnv, std: float = 2.0) -> torch.Tensor:
+    """交互力矩跟踪奖励（SoftMimic Table VI，sigma 2 N·m，权重 2.0）。"""
+    buffers = _softsonic_wrench_buffers(env, "torque")
+    if buffers is None:   # 首步，事件项尚未跑过
+        return torch.ones(env.num_envs, device=env.device)
+    actual, desired, active = buffers
+    err = (actual - desired).norm(dim=-1)
+    reward = torch.exp(-(err * err) / (std * std))
+    return torch.where(active, reward, torch.ones_like(reward))
+
+
+def alive(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """存活奖励（SoftMimic Table VI 权重 1.5）。
+
+    SONIC 发布配置的 12 个奖励项里没有存活项。平时无所谓，但我们把终止判据改瞄
+    q_aug、放宽阈值之后，探索期需要一个"活着就有分"的托底项，否则策略容易学成
+    提前终止来规避负项。
+    """
+    return torch.ones(env.num_envs, device=env.device)

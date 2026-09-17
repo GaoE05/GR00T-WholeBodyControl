@@ -1,0 +1,8 @@
+# 交互力跟踪：实际力应接近期望力。sigma/weight 取自 SoftMimic Table VI。
+# 仅在力场设定下有意义（力由机器人姿态决定）；纯力回放下本项退化成常数。
+applied_force_tracking:
+  _target_: isaaclab.managers.RewardTermCfg
+  func: gear_sonic.envs.manager_env.mdp:applied_force_tracking_error
+  weight: 2.0
+  params:
+    std: 20.0

@@ -294,9 +294,21 @@ def apply_softsonic_force_field(
 
         forces[rows, cols] = f
         torques[rows, cols] = t
-        env._softsonic_last_force = f  # noqa: SLF001  供 debug 与力跟踪奖励复用
-    else:
-        env._softsonic_last_force = None  # noqa: SLF001
+        env._softsonic_last_force = f  # noqa: SLF001  debug 用（只含活跃行）
+
+    # 供力跟踪奖励读取的全尺寸缓冲。奖励在下一步的 line 208 计算，那时这里存的正是
+    # 本步物理实际施加的力 —— IsaacLab 的顺序是 终止(204) -> 奖励(208) ->
+    # 指令推进(232) -> 事件(235)，所以不存在滞后。
+    actual_f = torch.zeros(env.num_envs, 3, device=env.device)
+    actual_t = torch.zeros_like(actual_f)
+    if active.any():
+        actual_f[rows] = f
+        actual_t[rows] = t
+    env._softsonic_force_actual = actual_f  # noqa: SLF001
+    env._softsonic_torque_actual = actual_t  # noqa: SLF001
+    env._softsonic_force_desired = ss[:, sl["desired_force"]].clone()  # noqa: SLF001
+    env._softsonic_torque_desired = ss[:, sl["desired_torque"]].clone()  # noqa: SLF001
+    env._softsonic_active = active.clone()  # noqa: SLF001
 
     # 外力缓冲是持久的，必须每步重写全部环境，否则无力环境残留上一帧
     robot.permanent_wrench_composer.set_forces_and_torques(
