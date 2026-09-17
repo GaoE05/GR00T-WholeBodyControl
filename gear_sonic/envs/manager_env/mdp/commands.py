@@ -488,6 +488,12 @@ class TrackingCommand(CommandTerm):
         self.metrics["error_body_pos"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["error_body_rot"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["error_joint_pos"] = torch.zeros(self.num_envs, device=self.device)
+        # SoftSONIC：对**柔顺目标 q_aug** 的跟踪误差。
+        # 上面那些 error_* 用的是 q_ref，柔顺退让会让它们**变大**（这是应有表现，
+        # 不是退化）—— 于是单看它们无法区分"正确地柔顺"和"单纯跟踪变差"。
+        # 这两项才是"有没有跟上柔顺目标"的直接度量，训练中应保持低位。
+        self.metrics["error_joint_pos_aug"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["error_body_pos_aug"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["error_joint_vel"] = torch.zeros(self.num_envs, device=self.device)
 
         self.use_ref_motion_root_quat_w_as_anchor = False
@@ -2532,6 +2538,19 @@ class TrackingCommand(CommandTerm):
             self.metrics["error_joint_pos"] = torch.abs(self.joint_pos - self.robot_joint_pos).mean(
                 dim=-1
             )
+        # SoftSONIC：对 q_aug 的跟踪误差。无 aug 数据时保持为 0。
+        if self.motion_lib.has_aug_pose:
+            steps = self.motion_start_time_steps + self.time_steps
+            dof_aug = self.motion_lib.get_dof_pos_aug(self.motion_ids, steps)
+            robot_dof = (
+                self.robot_joint_pos[:, self.body_joint_indices]
+                if self.has_dof_mismatch
+                else self.robot_joint_pos
+            )
+            self.metrics["error_joint_pos_aug"] = torch.abs(dof_aug - robot_dof).mean(dim=-1)
+            self.metrics["error_body_pos_aug"] = torch.norm(
+                self.body_pos_w_aug - self.robot_body_pos_w, dim=-1
+            ).mean(dim=-1)
             self.metrics["error_joint_vel"] = torch.abs(self.joint_vel - self.robot_joint_vel).mean(
                 dim=-1
             )
