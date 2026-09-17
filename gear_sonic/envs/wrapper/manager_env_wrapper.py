@@ -104,6 +104,13 @@ class ManagerEnvWrapper:
         # [-1, 0.9375]，residual 无界意味着 token 可以被推到训练分布之外，解码器在那里
         # 是纯外推。设为 None 保持原行为。
         self._latent_residual_clip = self.config.get("latent_residual_clip", None)
+        # SoftSONIC：把 residual 强制归零，用来跑 frozen SONIC 基线。
+        # 归零而不是"不加载 checkpoint"，是为了让基线与 SoftSONIC 走**完全相同**的
+        # 代码路径（同样的观测、同样的 ATM、同样的力场），两者只差 Δz 这一项，
+        # 对比才干净。
+        self._zero_latent_residual = self.config.get("zero_latent_residual", False)
+        # replay 通路回放 q_aug 而非 q_ref（见 _update_replay_frame）
+        self._replay_use_aug = self.config.get("replay_use_aug", False)
 
         # Student direct latent mode: policy outputs FULL latent (not residual)
         # This is used for vision student policies that learned to output full latent
@@ -348,6 +355,8 @@ class ManagerEnvWrapper:
         未配置时原样返回。截断作用在 latent 上而不是关节动作上 —— ``action_clip_value``
         管的是 ATM 解码之后的 29 维关节目标，拦不住 token 跑出 FSQ 的有效值域。
         """
+        if self._zero_latent_residual:
+            return torch.zeros_like(scaled_residual)
         if self._latent_residual_clip is None:
             return scaled_residual
         c = self._latent_residual_clip
@@ -2014,22 +2023,33 @@ class ManagerEnvWrapper:
             return
 
         # Get motion data at current time steps for all environments
-        root_pos = self._motion_lib.get_root_pos_w(self._replay_motion_ids, self._replay_time_steps)
-        root_quat = self._motion_lib.get_root_quat_w(
-            self._replay_motion_ids, self._replay_time_steps
-        )
-        root_lin_vel = self._motion_lib.get_root_lin_vel_w(
-            self._replay_motion_ids, self._replay_time_steps
-        )
-        root_ang_vel = self._motion_lib.get_root_ang_vel_w(
-            self._replay_motion_ids, self._replay_time_steps
-        )
-        motion_lib_joint_pos = self._motion_lib.get_dof_pos(
-            self._replay_motion_ids, self._replay_time_steps
-        )
-        motion_lib_joint_vel = self._motion_lib.get_dof_vel(
-            self._replay_motion_ids, self._replay_time_steps
-        )
+        # 注意：run_replay 的**录像**功能不可用 —— 它的循环里只有 sim.render()、
+        # 没有 sim.step()，写进 PhysX 的状态从不刷到渲染管线，相机也因缺少
+        # recorders.py:113 附近那三步（_sync_usd_on_fabric_write / 连续两次 render /
+        # _is_outdated+force_recompute）而停在原点。出对比视频请走 recorders=render。
+        # 下面的 aug 支持本身是正确的（缓冲已核对为同形状 4955），保留备用。
+        #
+        # SoftSONIC：replay_use_aug=True 时回放柔顺监督目标 q_aug 而非参考动作 q_ref，
+        # 用来出"target motion"那一路对比视频 —— 即"完全柔顺的机器人该长什么样"。
+        # q_aug 侧没有 get_root_*_w，用 get_body_*_w_aug(...)[:, 0]：已核对
+        # get_root_pos_w 就是 body_pos_w[:, 0, :]，两者精确对应；且
+        # motion_lib_base.py:2346 的 trans_aug[..., 2] -= trans_fix 确认 q_aug
+        # 用了与 q_ref 相同的高度偏移，不会整体偏高或偏低。
+        ml, mid, ts = self._motion_lib, self._replay_motion_ids, self._replay_time_steps
+        if getattr(self, "_replay_use_aug", False):
+            root_pos = ml.get_body_pos_w_aug(mid, ts)[:, 0]
+            root_quat = ml.get_body_quat_w_aug(mid, ts)[:, 0]
+            root_lin_vel = ml.get_body_lin_vel_w_aug(mid, ts)[:, 0]
+            root_ang_vel = ml.get_body_ang_vel_w_aug(mid, ts)[:, 0]
+            motion_lib_joint_pos = ml.get_dof_pos_aug(mid, ts)
+            motion_lib_joint_vel = ml.get_dof_vel_aug(mid, ts)
+        else:
+            root_pos = ml.get_root_pos_w(mid, ts)
+            root_quat = ml.get_root_quat_w(mid, ts)
+            root_lin_vel = ml.get_root_lin_vel_w(mid, ts)
+            root_ang_vel = ml.get_root_ang_vel_w(mid, ts)
+            motion_lib_joint_pos = ml.get_dof_pos(mid, ts)
+            motion_lib_joint_vel = ml.get_dof_vel(mid, ts)
 
         # Handle DOF mismatch between motion library (e.g., 29 DOF) and robot (e.g., 43 DOF)
         robot_num_joints = self.motion_command.robot.num_joints

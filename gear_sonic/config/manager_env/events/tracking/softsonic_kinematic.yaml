@@ -1,0 +1,30 @@
+# 出 target motion 对比视频用的事件组合 = softsonic 组合 + 运动学驱动。
+#
+# 力场仍然施加（画面里外力依然存在），但被运动学驱动的机器人不受其影响 —— 这一路
+# 给的是"完全柔顺应该长什么样"的参考，另两路（frozen SONIC / SoftSONIC）才是物理
+# 仿真结果。
+#
+# 这里**重复列出** softsonic.yaml 的 defaults 而不是包含它：hydra 在嵌套包含时会把
+# 相对路径的基准改成包含方所在目录，`terms/...` 会被错解析成
+# `events/tracking/terms/...`。故意用重复换取健壮。
+# 若 tracking/softsonic.yaml 的项有增减，这里要同步。
+
+defaults:
+  - terms/physics_material@_here_
+  - terms/add_joint_default_pos@_here_
+  - terms/base_com@_here_
+  - terms/randomize_rigid_body_mass@_here_
+  - terms/softsonic_force_field@_here_
+  - terms/softsonic_kinematic_drive@_here_
+
+_target_: gear_sonic.envs.manager_env.mdp.events.EventCfg
+
+randomize_rigid_body_mass:
+  mode: "startup"
+  params:
+    asset_cfg:
+      _target_: isaaclab.managers.SceneEntityCfg
+      name: "robot"
+      body_names: ".*wrist_yaw.*|torso_link"
+    mass_distribution_params: [0.8, 2.5]
+    operation: "scale"

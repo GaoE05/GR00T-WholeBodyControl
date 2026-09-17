@@ -1,0 +1,12 @@
+# SoftSONIC：运动学驱动机器人跟随参考轨迹，用于出"target motion"那一路对比视频。
+# use_aug=true 写柔顺目标 q_aug（完全柔顺的机器人该在的位姿），false 写原始 q_ref。
+# 与力场事件同为逐步 interval（0.02s = 50Hz 控制步长），is_global_time=true。
+softsonic_kinematic_drive:
+  _target_: isaaclab.managers.EventTermCfg
+  func: gear_sonic.envs.manager_env.mdp:softsonic_kinematic_drive
+  mode: "interval"
+  interval_range_s: [0.02, 0.02]
+  is_global_time: true
+  params:
+    command_name: "motion"
+    use_aug: true

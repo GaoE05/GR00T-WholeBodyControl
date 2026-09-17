@@ -32,6 +32,9 @@ class EventCfg:
 
     # interval - SoftSONIC：按增强数据的力场参数施加外力（见 apply_softsonic_force_field）
     softsonic_force_field = None
+    # interval - SoftSONIC：运动学驱动，出 target motion 对比视频用
+    # （见 softsonic_kinematic_drive）
+    softsonic_kinematic_drive = None
 
 
 def randomize_joint_default_pos(
@@ -148,6 +151,84 @@ def randomize_rigid_body_com(
 # ══════════════════════════════════════════════════════════════════════════════
 # SoftSONIC：从增强数据回放外力
 # ══════════════════════════════════════════════════════════════════════════════
+
+def softsonic_kinematic_drive(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor | None,  # noqa: ARG001
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    command_name: str = "motion",
+    use_aug: bool = True,
+) -> None:
+    """每步把机器人状态直接写成参考轨迹，用于出"target motion"那一路对比视频。
+
+    ``use_aug=True`` 写柔顺监督目标 q_aug，即"一个完全柔顺的机器人此刻该在的位姿"；
+    ``False`` 写原始参考 q_ref。这一路是**运动学驱动**，不受外力影响 —— 它给出的是
+    对比视频里的"应该长什么样"，另外两路（frozen SONIC / SoftSONIC）才是物理仿真。
+
+    为什么做成事件项而不用 ``run_replay``：后者的录像通路不可用（循环里只有
+    ``sim.render()``、没有 ``sim.step()``，写进 PhysX 的状态从不刷到渲染管线，相机也
+    停在原点）。做成逐步事件后，状态写入发生在正常的 ``env.step()`` 周期内，
+    ``recorders=render`` 那条维护中的通路能正确取到画面。
+
+    状态写入的四个量与 ``commands.py`` 的 reset 分支一致：只换关节角会留下不自洽的
+    根位姿（q_aug 的骨盆相对 q_ref 中位移动 10.5cm、p90 达 26.4cm）。
+
+    Args:
+        asset_cfg: 机器人实体。
+        command_name: 运动跟踪指令项的名字。
+        use_aug: True 写 q_aug，False 写 q_ref。
+    """
+    from isaaclab.assets import Articulation as _Articulation
+
+    robot: _Articulation = env.scene[asset_cfg.name]
+    command = env.command_manager.get_term(command_name)
+    motion_lib = command.motion_lib
+
+    total = motion_lib.get_time_step_total(command.motion_ids)
+    steps = torch.clamp(
+        command.motion_start_time_steps + command.time_steps,
+        torch.zeros_like(total),
+        total - 1,
+    )
+
+    if use_aug:
+        if not motion_lib.has_aug_pose:
+            raise RuntimeError(
+                "use_aug=True 但动作数据里没有 pose_aa_aug。"
+                "用 scripts/cma_to_motionlib.py --with-softsonic 重新生成。"
+            )
+        root_pos = motion_lib.get_body_pos_w_aug(command.motion_ids, steps)[:, 0]
+        root_quat = motion_lib.get_body_quat_w_aug(command.motion_ids, steps)[:, 0]
+        root_lin = motion_lib.get_body_lin_vel_w_aug(command.motion_ids, steps)[:, 0]
+        root_ang = motion_lib.get_body_ang_vel_w_aug(command.motion_ids, steps)[:, 0]
+        dof_pos = motion_lib.get_dof_pos_aug(command.motion_ids, steps)
+        dof_vel = motion_lib.get_dof_vel_aug(command.motion_ids, steps)
+    else:
+        root_pos = motion_lib.get_root_pos_w(command.motion_ids, steps)
+        root_quat = motion_lib.get_root_quat_w(command.motion_ids, steps)
+        root_lin = motion_lib.get_root_lin_vel_w(command.motion_ids, steps)
+        root_ang = motion_lib.get_root_ang_vel_w(command.motion_ids, steps)
+        dof_pos = motion_lib.get_dof_pos(command.motion_ids, steps)
+        dof_vel = motion_lib.get_dof_vel(command.motion_ids, steps)
+
+    # 关节数可能多于动作数据的自由度（例如 43 DOF 机器人 + 29 DOF 数据），
+    # 与 _update_replay_frame 相同的处理：按 body_joint_indices 映射，其余置零。
+    n_robot = robot.num_joints
+    if n_robot > dof_pos.shape[-1]:
+        idx = getattr(env.wrapper, "_body_joint_indices", None)
+        if idx is None:
+            raise RuntimeError(f"机器人 {n_robot} 个关节多于数据的 {dof_pos.shape[-1]}，但缺少映射索引")
+        full_pos = torch.zeros(env.num_envs, n_robot, device=env.device, dtype=dof_pos.dtype)
+        full_vel = torch.zeros_like(full_pos)
+        full_pos[:, idx] = dof_pos
+        full_vel[:, idx] = dof_vel
+        dof_pos, dof_vel = full_pos, full_vel
+
+    robot.write_joint_state_to_sim(dof_pos, dof_vel)
+    robot.write_root_state_to_sim(
+        torch.cat([root_pos + env.scene.env_origins, root_quat, root_lin, root_ang], dim=-1)
+    )
+
 
 def apply_softsonic_force_field(
     env: ManagerBasedEnv,
