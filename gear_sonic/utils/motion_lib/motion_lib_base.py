@@ -665,6 +665,14 @@ class MotionLibBase:
             )
         return self.body_quat_w_aug[motion_steps + self.length_starts[motion_ids]]
 
+    def get_body_lin_vel_w_aug(self, motion_ids, motion_steps):
+        """取柔顺目标 q_aug 的连杆线速度（与 get_body_lin_vel_w 平行）。"""
+        return self.body_lin_vel_w_aug[motion_steps + self.length_starts[motion_ids]]
+
+    def get_body_ang_vel_w_aug(self, motion_ids, motion_steps):
+        """取柔顺目标 q_aug 的连杆角速度。"""
+        return self.body_ang_vel_w_aug[motion_steps + self.length_starts[motion_ids]]
+
     def get_time_step_total(self, motion_ids):
         return self._motion_num_frames[motion_ids]
 
@@ -1164,6 +1172,8 @@ class MotionLibBase:
         _motion_softsonic = []
         _motion_aug_pos = []
         _motion_aug_quat = []
+        _motion_aug_linvel = []
+        _motion_aug_angvel = []
         _motion_smpl_poses = []
         _motion_smpl_joints = []
         _motion_smpl_transl = []
@@ -1474,6 +1484,8 @@ class MotionLibBase:
             if self.has_aug_pose:
                 _motion_aug_pos.append(curr_motion.aug_global_translation)
                 _motion_aug_quat.append(curr_motion.aug_global_rotation)
+                _motion_aug_linvel.append(curr_motion.aug_global_velocity)
+                _motion_aug_angvel.append(curr_motion.aug_global_angular_velocity)
             if self.smpl_data is not None:
                 _motion_smpl_poses.append(curr_motion["smpl_pose"])
                 if "smpl_joints" in curr_motion:
@@ -1614,6 +1626,12 @@ class MotionLibBase:
             # 与 body_pos_w / body_quat_w 平行的柔顺目标缓冲。下面的重索引会同样处理。
             self.body_pos_w_aug = torch.cat(_motion_aug_pos, dim=0).float().to(self._device)
             self.body_quat_w_aug = torch.cat(_motion_aug_quat, dim=0).float().to(self._device)
+            self.body_lin_vel_w_aug = (
+                torch.cat(_motion_aug_linvel, dim=0).float().to(self._device)
+            )
+            self.body_ang_vel_w_aug = (
+                torch.cat(_motion_aug_angvel, dim=0).float().to(self._device)
+            )
         self.body_quat_w = (
             torch.cat([m.global_rotation for m in motions], dim=0).float().to(self._device)
         )
@@ -1758,6 +1776,12 @@ class MotionLibBase:
                 )
                 self.body_pos_w_aug = self.body_pos_w_aug_full[:, self.body_indexes]
                 self.body_quat_w_aug = self.body_quat_w_aug_full[:, self.body_indexes]
+                self.body_lin_vel_w_aug = self.body_lin_vel_w_aug[
+                    :, self.m_cfg.mujoco_to_isaaclab_body
+                ][:, self.body_indexes]
+                self.body_ang_vel_w_aug = self.body_ang_vel_w_aug[
+                    :, self.m_cfg.mujoco_to_isaaclab_body
+                ][:, self.body_indexes]
             assert (
                 self.m_cfg.get("anchor_body_idx_full", 0) == 0 and self.body_indexes[0] == 0
             ), "The anchor body has to be 0; otherwise will cause issues in the sliced body_indexes data's anchor."
@@ -2317,6 +2341,12 @@ class MotionLibBase:
                     )
                     # 注意这里仍是 fk_batch 的 xyzw 约定，转 wxyz 在统一重索引处做
                     curr_motion.aug_global_rotation = aug_out["global_rotation"].squeeze(0)
+                    # 速度也一并取：柔顺退让本身是运动，速度奖励若仍瞄 q_ref
+                    # （站立动作速度近零）会精确惩罚我们在别处奖励的行为。
+                    curr_motion.aug_global_velocity = aug_out["global_velocity"].squeeze(0)
+                    curr_motion.aug_global_angular_velocity = aug_out[
+                        "global_angular_velocity"
+                    ].squeeze(0)
                 if self.has_softsonic:
                     raw_ss = to_torch(curr_file[SOFTSONIC_FIELD]).clone()[start:end]
                     # 必须重采样到与 fk_batch 输出相同的帧数。curr_file 里的字段是

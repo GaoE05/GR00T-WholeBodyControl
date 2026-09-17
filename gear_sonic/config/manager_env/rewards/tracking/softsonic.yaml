@@ -9,9 +9,12 @@
 #    q_aug 在无外力时严格等于 q_ref（实测无力帧关节偏差中位 0.000°），所以这是
 #    安全的整体替换；**不能**采用"保留 q_ref 项再叠加 q_aug 项"的做法，那会在
 #    有力时制造拉锯，正是 SoftMimic 指出的刚性局部最优陷阱。
-#    速度项（linvel/angvel）暂留 q_ref：q_aug 的速度是 IK 解的数值微分，含较大
-#    瞬态（实测 accel_dist 高 20 倍），先不作为紧约束。这是对 SoftMimic Table VI
-#    的一处有意偏离，记在此处。
+#    速度项（linvel/angvel，合计权重 2.0）同样改瞄 q_aug。一开始留在 q_ref，
+#    复查时发现那是**方向相反的 2.0 权重**：柔顺退让本身就是运动（0.2~1s 内手腕
+#    走 24cm），而站立动作的 q_ref 速度接近零，于是这两项会精确惩罚位姿项与力项
+#    所奖励的行为 —— 正是 SoftMimic 指出的刚性局部最优拉锯。q_aug 的速度由
+#    fk_batch 在加载时一并解出（global_velocity / global_angular_velocity），
+#    与位姿同源同插值。
 #
 # B. 新增交互力/力矩跟踪（各 2.0）。这是柔顺能被**度量**的直接信号。
 #
@@ -52,3 +55,13 @@ tracking_relative_body_ori:
   func: gear_sonic.envs.manager_env.mdp:tracking_compliant_relative_body_ori_error
 tracking_vr_5point_local:
   func: gear_sonic.envs.manager_env.mdp:tracking_compliant_local_vr_5point_error
+tracking_body_linvel:
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_body_linvel_error
+tracking_body_angvel:
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_body_angvel_error
+
+# feet_acc：仓库项文件的默认值是 -2.5e-7，但发布 checkpoint 实际训练时用的是
+# -2.5e-06（见 sonic_release/config.yaml），差 10 倍。我们冻结该 checkpoint 的 ATM
+# 只训 residual，配方应与它一致，故显式对齐到发布值。
+feet_acc:
+  weight: -2.5e-06

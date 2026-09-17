@@ -2292,6 +2292,20 @@ class TrackingCommand(CommandTerm):
             + self._env.scene.env_origins[:, None, :]
         )
 
+    @property
+    def body_lin_vel_w_aug(self) -> torch.Tensor:
+        """柔顺目标的连杆线速度，形状 (num_envs, num_bodies, 3)。"""
+        return self.motion_lib.get_body_lin_vel_w_aug(
+            self.motion_ids, self.motion_start_time_steps + self.time_steps
+        )
+
+    @property
+    def body_ang_vel_w_aug(self) -> torch.Tensor:
+        """柔顺目标的连杆角速度，形状 (num_envs, num_bodies, 3)。"""
+        return self.motion_lib.get_body_ang_vel_w_aug(
+            self.motion_ids, self.motion_start_time_steps + self.time_steps
+        )
+
     # ── /SoftSONIC ───────────────────────────────────────────────────────────
 
     @property

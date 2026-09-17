@@ -763,6 +763,34 @@ def _softsonic_wrench_buffers(env: ManagerBasedRLEnv, kind: str):
     return None
 
 
+def tracking_compliant_body_linvel_error(
+    env: ManagerBasedRLEnv, command_name: str, std: float, body_names: list[str] | None = None
+) -> torch.Tensor:
+    """连杆线速度跟踪奖励，目标为柔顺参考 q_aug。
+
+    这一项必须瞄 q_aug，不能留在 q_ref：柔顺退让**本身就是运动**（0.2~1 秒内手腕
+    走 24cm），而站立动作的 q_ref 速度接近零。若仍瞄 q_ref，这两个速度项（合计
+    权重 2.0）会精确惩罚我们在位姿项与力项上奖励的行为 —— 正是 SoftMimic 指出的
+    刚性局部最优拉锯。
+    """
+    command: TrackingCommand = env.command_manager.get_term(command_name)
+    tracked = _get_body_indexes(command, body_names)
+    vel_diff = command.body_lin_vel_w_aug[:, tracked] - command.robot_body_lin_vel_w[:, tracked]
+    per_body_err = (vel_diff * vel_diff).sum(dim=-1)
+    return torch.exp(-per_body_err.mean(dim=-1) / (std * std))
+
+
+def tracking_compliant_body_angvel_error(
+    env: ManagerBasedRLEnv, command_name: str, std: float, body_names: list[str] | None = None
+) -> torch.Tensor:
+    """连杆角速度跟踪奖励，目标为柔顺参考 q_aug。"""
+    command: TrackingCommand = env.command_manager.get_term(command_name)
+    tracked = _get_body_indexes(command, body_names)
+    vel_diff = command.body_ang_vel_w_aug[:, tracked] - command.robot_body_ang_vel_w[:, tracked]
+    per_body_err = (vel_diff * vel_diff).sum(dim=-1)
+    return torch.exp(-per_body_err.mean(dim=-1) / (std * std))
+
+
 def applied_force_tracking_error(env: ManagerBasedRLEnv, std: float = 20.0) -> torch.Tensor:
     """交互力跟踪奖励：实际力应接近期望力（SoftMimic Table VI，sigma 20 N，权重 2.0）。
 
