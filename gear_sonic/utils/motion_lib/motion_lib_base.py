@@ -32,10 +32,29 @@ class FixHeightMode(enum.Enum):
 # 额外的逐帧字段 "softsonic"，携带柔顺增强的监督目标与要回放的外力。
 # 完全照 "action" 字段的模式接线，以便复用已有的帧索引与 30→50Hz 重采样逻辑。
 #
-# 形状 (T, 7)，列布局：
-#     [0:3]  要施加的外力 F（世界系，N）
-#     [3:6]  要施加的外力矩 tau（N·m）
-#     [6:7]  受力连杆的**规范索引**，见下方 SOFTSONIC_FORCE_BODIES（-1 = 无目标连杆）
+# 形状 (T, 15)，列布局：
+#     [ 0: 3]  **期望**外力 F（世界系，N）—— 力跟踪奖励的目标，不是直接施加的力
+#     [ 3: 6]  **期望**外力矩 tau（N·m）
+#     [ 6: 7]  受力连杆的**规范索引**，见下方 SOFTSONIC_FORCE_BODIES（-1 = 无目标连杆）
+#     [ 7: 8]  力场线刚度 k_ff（N/m）
+#     [ 8: 9]  力场角刚度 k_ff_rot（N·m/rad）
+#     [ 9:12]  力场设定点相对参考手位的偏移 delta_ff = p_ff - p_ref（m）
+#     [12:15]  力场设定点朝向相对参考朝向的旋转向量 rotvec(rot_ff · r_ref⁻¹)
+#
+# ## 为什么存力场参数而不是直接存力
+#
+# 仿真里施加的力必须是 `F = k_ff · (p_ff - p_hand_实际)`，而不是逐帧回放记录的 F。
+# SoftMimic 的设定点满足 `p_ff = p_ref + F/k_ff + F/k_robot`（ik_update.py:202），
+# 于是：
+#   - 手到达柔顺位置 p_des = p_ref + F/k_robot  ->  F_actual = F（期望值）
+#   - 手硬扛留在 p_ref                          ->  F_actual = F·(1 + k_ff/k_robot)，更大
+#   - 手过度退让                                ->  F_actual 更小
+# 即"柔顺降低交互力"是公式内生的物理反馈。若逐帧回放 F，退让与硬扛感受到的力完全
+# 一样，这个反馈回路消失 —— 力跟踪奖励会退化成与策略无关的常数，论文最有力的
+# 安全性主张（SoftMimic Fig.4/5）也无从度量。
+#
+# delta_ff 存的是**相对参考手位的偏移**而非绝对坐标，这样平移不变：运行时取
+# Isaac Lab 里参考手的世界位置再加上它即可，不受 env_origins 与动作平移影响。
 #
 # 这里**只存外力**，不存 q_aug 的位姿。柔顺监督目标 q_aug 走另一条路：pkl 里的
 # `pose_aa_aug` / `root_trans_aug` 字段在加载时过第二次 fk_batch，得到与 q_ref
@@ -56,7 +75,7 @@ class FixHeightMode(enum.Enum):
 # 注意外力必须与生成 q_aug 时所用的力逐帧一致，否则 q_aug 不是正确的监督目标 ——
 # 这就是为什么力要从数据里回放而不是在仿真里独立采样。
 SOFTSONIC_FIELD = "softsonic"
-SOFTSONIC_WIDTH = 7
+SOFTSONIC_WIDTH = 15
 # 可受力连杆的规范顺序（SoftMimic constants.py 的 FORCEABLE_LINKS 与
 # DOWNWARD_ONLY_FORCEABLE_LINKS 之并集）。索引写进数据，名字在运行时解析。
 SOFTSONIC_FORCE_BODIES = [
@@ -67,9 +86,13 @@ SOFTSONIC_FORCE_BODIES = [
     "right_shoulder_pitch_link",
 ]
 SOFTSONIC_SLICES = {
-    "ext_force": slice(0, 3),
-    "ext_torque": slice(3, 6),
+    "desired_force": slice(0, 3),
+    "desired_torque": slice(3, 6),
     "force_body_id": slice(6, 7),
+    "ff_stiffness": slice(7, 8),
+    "ff_rot_stiffness": slice(8, 9),
+    "ff_setpoint_delta_pos": slice(9, 12),
+    "ff_setpoint_delta_rotvec": slice(12, 15),
 }
 # 柔顺监督目标走 fk_batch 那条路，这两个字段是它的输入
 SOFTSONIC_AUG_POSE_FIELD = "pose_aa_aug"
