@@ -30,8 +30,8 @@ class EventCfg:
 
     randomize_rigid_body_mass = None
 
-    # interval - SoftSONIC：从增强数据回放外力（见 replay_softsonic_external_wrench）
-    softsonic_replay_wrench = None
+    # interval - SoftSONIC：按增强数据的力场参数施加外力（见 apply_softsonic_force_field）
+    softsonic_force_field = None
 
 
 def randomize_joint_default_pos(
@@ -149,81 +149,97 @@ def randomize_rigid_body_com(
 # SoftSONIC：从增强数据回放外力
 # ══════════════════════════════════════════════════════════════════════════════
 
-def replay_softsonic_external_wrench(
+def apply_softsonic_force_field(
     env: ManagerBasedEnv,
     env_ids: torch.Tensor | None,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     command_name: str = "motion",
-    force_threshold: float = 1.0,
+    max_force: float = 140.0,
+    max_torque: float = 10.0,
     debug_print_every_n_steps: int = 0,
 ) -> None:
-    """把 CMA 增强数据里记录的外力逐帧回放到仿真中。
+    """按增强数据里的力场参数，在仿真中施加外力/力矩。
 
-    ## 为什么是回放而不是在仿真里采样
+    ## 为什么是力场而不是直接回放记录的力
 
-    ``q_aug`` 是 CMA 针对**某个特定力剖面**离线用 IK 解出来的。若仿真施加的力与
-    生成时的不一致，``q_aug`` 就不是正确的监督目标。所以力必须随数据走 —— 这也是
-    SoftMimic 的 ``(q_ref, w_i, K_cmd, q_aug)`` 四元组数据的含义。
-    逐帧力数据由 ``scripts/cma_to_motionlib.py --with-softsonic`` 写入 motion_lib 的
-    ``softsonic`` 字段，见 ``motion_lib_base.SOFTSONIC_SLICES``。
+    直接回放 F(t) 会让**柔顺退让的机器人和硬扛的机器人感受到完全一样的力**，物理
+    反馈回路消失：力跟踪奖励退化成与策略无关的常数，"柔顺降低交互力"这个安全性
+    主张也无从度量。
 
-    ## 为什么用 interval 事件而不是 command term
+    SoftMimic 的做法是模拟一个弹簧。设定点满足（``ik_update.py:202``）::
 
-    IsaacLab 的 ``ManagerBasedRLEnv.step`` 顺序是：
-    ``apply_action -> write_data_to_sim -> sim.step``（decimation 循环内）
-    ``-> command_manager.compute -> event_manager.apply(mode="interval")``。
-    物理步进之前没有可用钩子（除 action manager），所以任何写入都会在**下一个**
-    物理步生效。而 interval 事件跑在 ``command_manager.compute`` 之后 —— 那时
-    ``TrackingCommand.time_steps`` 已经推进到 t+1，于是"读当前帧的力、写缓冲、
-    下个物理步生效"时序自动对齐，**不需要手动补偿一帧**。
+        p_ff = p_ref + F/k_ff + F/k_robot
 
-    配置上须设 ``interval_range_s=[step_dt, step_dt]`` 且 ``is_global_time=True``，
-    这样每步触发一次、``env_ids`` 传 None（全部环境）。
+    于是仿真里 ``F_actual = k_ff · (p_ff - p_hand)``::
 
-    ## 两个容易搞错的地方
+        手到柔顺位置 p_des = p_ref + F/k_robot  ->  F_actual = F（期望值）
+        手硬扛留在 p_ref                        ->  F_actual = F·(1 + k_ff/k_robot)
+        手过度退让                              ->  F_actual 更小
 
-    - **``is_global=True`` 必须显式传**。CMA 存的力是世界系的（其可视化直接用
-      连杆世界位置加力向量画箭头），而 IsaacLab 的接口默认是连杆局部系，不传的话
-      力会跟着连杆一起转。
-    - **判断是否施力要用 ``‖F‖``，不能用 ``force_body_id >= 0``**。CMA 存的
-      link_id 取自 ``current_event or event_queue[0]``，含尚未开始的排队事件 ——
-      实测 99% 的帧 id>=0 但只有约 66% 的帧 ‖F‖>1N。
+    数据里存的是**相对参考手位的偏移** delta_ff = p_ff - p_ref（平移不变），
+    运行时取 Isaac Lab 里参考连杆的世界位置再加上它。
+
+    ## 活跃判据
+
+    用 ``k_ff > 0``，不用 ``‖F‖`` 或 ``force_body_id >= 0``。上游 ``runner.py:427``
+    里 ``ff_stiffness`` 初始为 0、只在 ``current_event`` 存在时才赋值，是"当前有事件
+    正在施力"的精确标记；而 body id 含尚未开始的排队事件，力阈值会把斜坡起止段误判。
+
+    ## 时序
+
+    见 ``events.py`` 顶部关于 interval 事件的说明：本事件跑在
+    ``command_manager.compute`` 之后，``time_steps`` 已推进到 t+1，写入的力在下一个
+    物理步生效，时序自动对齐。
 
     Args:
         env: 环境。
         env_ids: interval + is_global_time=True 时为 None，表示全部环境。
         asset_cfg: 机器人实体。
-        command_name: 运动跟踪指令项的名字，用它拿 motion_ids 与 time_steps。
-        force_threshold: ‖F‖ 低于此值（N）视为无外力，清零该环境的力。
-        debug_print_every_n_steps: 非零时每 N 步打印一次施力统计，用于确认外力
-            真的进了仿真（仅靠配置加载成功不足以证明这件事）。
+        command_name: 运动跟踪指令项的名字。
+        max_force: 力的幅值上限（N），与 CMA 的 ``IK_CHECK_MAX_FORCE_MAGNITUDE`` 一致，
+            防止机器人被推飞时力发散。
+        max_torque: 力矩幅值上限（N·m）。
+        debug_print_every_n_steps: 非零时每 N 步打印期望力与实际力的对比，用于确认
+            物理反馈确实生效（硬扛时实际力应大于期望力）。
     """
     from isaaclab.assets import Articulation as _Articulation
+    from isaaclab.utils.math import (
+        axis_angle_from_quat,
+        quat_from_angle_axis,
+        quat_inv,
+        quat_mul,
+    )
+
     from gear_sonic.utils.motion_lib import motion_lib_base as _mlb
 
     robot: _Articulation = env.scene[asset_cfg.name]
     command = env.command_manager.get_term(command_name)
     motion_lib = command.motion_lib
 
-    # 规范索引 -> 本资产的 body 索引。只解析一次，缓存在 env 上。
+    # 规范索引 -> 本资产的 body 索引，只解析一次。该索引同时用于
+    # robot.data.body_pos_w 与 motion_lib 的 *_full 缓冲 —— 后者的文档写明是
+    # "all bodies, IsaacLab order"，与 robot.body_names 同序。
     cache_key = f"_softsonic_force_body_ids_{asset_cfg.name}"
     body_id_lut = getattr(env, cache_key, None)
     if body_id_lut is None:
+        n_full = motion_lib.body_pos_w_full.shape[1]
+        if n_full != robot.num_bodies:
+            raise ValueError(
+                f"motion_lib 的 full body 数 {n_full} 与资产的 {robot.num_bodies} 不一致，"
+                "无法共用同一套 body 索引。请检查 mujoco_to_isaaclab_body 配置。"
+            )
         ids = []
         for name in _mlb.SOFTSONIC_FORCE_BODIES:
             if name not in robot.body_names:
                 raise ValueError(
-                    f"SOFTSONIC_FORCE_BODIES 里的 {name!r} 不在资产 "
-                    f"{asset_cfg.name!r} 的 body 列表里。可用: {robot.body_names}"
+                    f"SOFTSONIC_FORCE_BODIES 里的 {name!r} 不在资产的 body 列表里"
                 )
             ids.append(robot.body_names.index(name))
         body_id_lut = torch.tensor(ids, dtype=torch.long, device=env.device)
         setattr(env, cache_key, body_id_lut)
 
-    # 绝对帧号是 motion_start_time_steps + time_steps。动作可能从随机帧开始
-    # （TrackingCommand._resample_command 里 sample_time_steps），只用 time_steps
-    # 会让回放的力与 q_aug 错位 —— 评估时起始帧恒为 0 所以看不出来，训练时才炸。
-    # 另外在触发终止与 reset 之间该值可能刚好等于总帧数，夹一下避免越界。
+    # 绝对帧号 = motion_start_time_steps + time_steps（动作可能从随机帧开始）；
+    # 在触发终止与 reset 之间该值可能等于总帧数，夹一下避免越界。
     total = motion_lib.get_time_step_total(command.motion_ids)
     steps = torch.clamp(
         command.motion_start_time_steps + command.time_steps,
@@ -233,33 +249,78 @@ def replay_softsonic_external_wrench(
 
     ss = motion_lib.get_motion_softsonic(command.motion_ids, steps)
     sl = _mlb.SOFTSONIC_SLICES
-    force_w = ss[:, sl["ext_force"]]
-    torque_w = ss[:, sl["ext_torque"]]
+    k_ff = ss[:, sl["ff_stiffness"]].squeeze(-1)
+    k_ff_rot = ss[:, sl["ff_rot_stiffness"]].squeeze(-1)
+    delta_p = ss[:, sl["ff_setpoint_delta_pos"]]
+    delta_rv = ss[:, sl["ff_setpoint_delta_rotvec"]]
     canon = ss[:, sl["force_body_id"]].squeeze(-1).long()
+    active = k_ff > 0.0
 
-    active = (torch.linalg.norm(force_w, dim=-1) > force_threshold) & (canon >= 0)
-
-    # 全零缓冲，只把活跃环境的目标连杆填上。外力缓冲是持久的，所以每步都必须
-    # 重写全部环境，否则无力的环境会残留上一帧的力。
     forces = torch.zeros(env.num_envs, robot.num_bodies, 3, device=env.device)
     torques = torch.zeros_like(forces)
+
     if active.any():
         rows = active.nonzero(as_tuple=False).squeeze(-1)
         cols = body_id_lut[canon[rows]]
-        forces[rows, cols] = force_w[rows]
-        torques[rows, cols] = torque_w[rows]
 
+        # 参考连杆位姿（Isaac Lab 世界系）。用 *_full 而非 body_pos_w：受力连杆未必
+        # 在运动指令的 14 个 body_names 里（例如 shoulder_pitch 就不在）。
+        ref_pos_full = motion_lib.get_body_pos_w_full(command.motion_ids, steps)
+        ref_quat_full = motion_lib.get_body_quat_w_full(command.motion_ids, steps)
+        ref_pos = ref_pos_full[rows, cols] + env.scene.env_origins[rows]
+        ref_quat = ref_quat_full[rows, cols]
+
+        hand_pos = robot.data.body_pos_w[rows, cols]
+        hand_quat = robot.data.body_quat_w[rows, cols]
+
+        # 线性：F = k_ff · (设定点 - 实际手位)
+        setpoint_pos = ref_pos + delta_p[rows]
+        f = k_ff[rows, None] * (setpoint_pos - hand_pos)
+
+        # 旋转：设定点朝向 = Rot(delta_rv) · 参考朝向，力矩 = k_ff_rot · rotvec(误差)
+        ang = torch.linalg.norm(delta_rv[rows], dim=-1)
+        axis = torch.where(
+            ang[:, None] > 1e-8, delta_rv[rows] / ang.clamp(min=1e-8)[:, None],
+            torch.tensor([1.0, 0.0, 0.0], device=env.device).expand_as(delta_rv[rows]),
+        )
+        setpoint_quat = quat_mul(quat_from_angle_axis(ang, axis), ref_quat)
+        t = k_ff_rot[rows, None] * axis_angle_from_quat(
+            quat_mul(setpoint_quat, quat_inv(hand_quat))
+        )
+
+        # 夹幅值，防止机器人被推飞后力发散
+        f = f * (max_force / torch.linalg.norm(f, dim=-1, keepdim=True).clamp(min=max_force))
+        t = t * (max_torque / torch.linalg.norm(t, dim=-1, keepdim=True).clamp(min=max_torque))
+
+        forces[rows, cols] = f
+        torques[rows, cols] = t
+        env._softsonic_last_force = f  # noqa: SLF001  供 debug 与力跟踪奖励复用
+    else:
+        env._softsonic_last_force = None  # noqa: SLF001
+
+    # 外力缓冲是持久的，必须每步重写全部环境，否则无力环境残留上一帧
     robot.permanent_wrench_composer.set_forces_and_torques(
         forces=forces, torques=torques, body_ids=None, env_ids=None, is_global=True
     )
 
     if debug_print_every_n_steps:
         counter = getattr(env, "_softsonic_wrench_step", 0) + 1
-        setattr(env, "_softsonic_wrench_step", counter)
+        env._softsonic_wrench_step = counter  # noqa: SLF001
         if counter % debug_print_every_n_steps == 0:
-            mags = torch.linalg.norm(force_w[active], dim=-1) if active.any() else force_w.new_zeros(1)
-            print(  # noqa: T201
-                f"[softsonic wrench] step {counter}: 施力环境 "
-                f"{int(active.sum())}/{env.num_envs}，‖F‖ 均值 {mags.mean():.2f} N "
-                f"最大 {mags.max():.2f} N"
-            )
+            if active.any():
+                want = torch.linalg.norm(ss[active][:, sl["desired_force"]], dim=-1)
+                got = torch.linalg.norm(env._softsonic_last_force, dim=-1)  # noqa: SLF001
+                # 比值只在期望力足够大时才有意义：力斜坡起止段期望力接近 0，
+                # 小分母会把比值放大到上百，是统计假象而非物理现象。
+                sig = want > 1.0
+                ratio = (
+                    (got[sig] / want[sig]).mean().item() if sig.any() else float("nan")
+                )
+                print(  # noqa: T201
+                    f"[softsonic ff] step {counter}: 活跃 {int(active.sum())}/{env.num_envs}，"
+                    f"期望力 {want.mean():.2f} N，实际力 {got.mean():.2f} N，"
+                    f"比值 {ratio:.2f}（仅统计期望力>1N 的环境；"
+                    "完全刚性的理论极限是 1 + k_ff/k_robot）"
+                )
+            else:
+                print(f"[softsonic ff] step {counter}: 无活跃力场")  # noqa: T201
