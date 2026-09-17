@@ -244,6 +244,10 @@ class TrajectoryRecorderTerm(recorder_manager.RecorderTerm):
     def _create_empty_data(self) -> dict:
         data = {
             "dof_pos": [],
+            # SoftSONIC：外力可视化所需（实际力/期望力/作用点，世界系，相对 env 原点）
+            "force_actual_w": [],
+            "force_desired_w": [],
+            "force_pos_w": [],
             "root_pos_w": [],
             "root_quat_w": [],
         }
@@ -284,6 +288,30 @@ class TrajectoryRecorderTerm(recorder_manager.RecorderTerm):
             # Root quaternion (wxyz)
             root_quat = robot.data.root_quat_w[i].cpu().numpy().copy()
             self._frame_data[i]["root_quat_w"].append(root_quat)
+
+            # SoftSONIC：外力。作用点取受力连杆的当前世界位置（无力时填零向量）。
+            # 记录在轨迹里而不是事后从动作数据重算 —— episode reset 会打乱帧与
+            # 动作帧号的对应，事后对齐不可靠。
+            fa = getattr(self.env, "_softsonic_force_actual", None)
+            fd = getattr(self.env, "_softsonic_force_desired", None)
+            fb = getattr(self.env, "_softsonic_active_force_body", None)
+            z3 = np.zeros(3, dtype=np.float32)
+            if fa is None or fb is None:
+                self._frame_data[i]["force_actual_w"].append(z3)
+                self._frame_data[i]["force_desired_w"].append(z3)
+                self._frame_data[i]["force_pos_w"].append(z3)
+            else:
+                bid = int(fb[i].item())
+                self._frame_data[i]["force_actual_w"].append(
+                    fa[i].cpu().numpy().copy() if bid >= 0 else z3)
+                self._frame_data[i]["force_desired_w"].append(
+                    fd[i].cpu().numpy().copy() if (fd is not None and bid >= 0) else z3)
+                if bid >= 0:
+                    fp = robot.data.body_pos_w[i, bid].cpu().numpy().copy() \
+                        - env_origins[i].cpu().numpy()
+                else:
+                    fp = z3
+                self._frame_data[i]["force_pos_w"].append(fp)
 
             # Object state
             if self._has_object:
@@ -334,6 +362,10 @@ class TrajectoryRecorderTerm(recorder_manager.RecorderTerm):
                 "num_joints": data["dof_pos"][0].shape[0],
                 "total_frames": len(data["dof_pos"]),
             }
+            if data.get("force_actual_w"):
+                trajectory["force_actual_w"] = np.array(data["force_actual_w"])
+                trajectory["force_desired_w"] = np.array(data["force_desired_w"])
+                trajectory["force_pos_w"] = np.array(data["force_pos_w"])
 
             if data.get("object_pos_w"):
                 trajectory["object_pos_w"] = np.array(data["object_pos_w"])

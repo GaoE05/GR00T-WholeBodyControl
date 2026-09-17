@@ -1,0 +1,95 @@
+# SoftSONIC 奖励组合 + 受力连杆跟踪（SoftMimic 力控实验里权重最高的两项，各 3.0）。
+# 与 tracking/softsonic.yaml 的唯一差别是多了末尾两项，其余逐行相同 ——
+# 重复列出而非包含，理由同 events/tracking/softsonic_kinematic.yaml（hydra 嵌套
+# 包含会改变 defaults 的相对路径基准）。softsonic.yaml 若有增减，这里要同步。
+
+# =============================================================================
+# SoftSONIC 的奖励组合
+# =============================================================================
+#
+# 在发布配置 base_5point_local_feet_acc 的基础上做三件事（逐项依据见
+# notes/reward-mapping.md）：
+#
+# A. 把 5 个位姿跟踪项的目标从 q_ref 改到 q_aug —— 只换 func，项名和权重不动。
+#    q_aug 在无外力时严格等于 q_ref（实测无力帧关节偏差中位 0.000°），所以这是
+#    安全的整体替换；**不能**采用"保留 q_ref 项再叠加 q_aug 项"的做法，那会在
+#    有力时制造拉锯，正是 SoftMimic 指出的刚性局部最优陷阱。
+#    速度项（linvel/angvel，合计权重 2.0）同样改瞄 q_aug。一开始留在 q_ref，
+#    复查时发现那是**方向相反的 2.0 权重**：柔顺退让本身就是运动（0.2~1s 内手腕
+#    走 24cm），而站立动作的 q_ref 速度接近零，于是这两项会精确惩罚位姿项与力项
+#    所奖励的行为 —— 正是 SoftMimic 指出的刚性局部最优拉锯。q_aug 的速度由
+#    fk_batch 在加载时一并解出（global_velocity / global_angular_velocity），
+#    与位姿同源同插值。
+#
+# B. 新增交互力/力矩跟踪（各 2.0）。这是柔顺能被**度量**的直接信号。
+#
+# C. 新增存活项（1.5）。终止判据改瞄 q_aug 后探索期需要托底。
+#
+# 力连杆位置/朝向强调项（SoftMimic 各 3.0）暂不加：CMA 的 IK 把 compliant
+# interaction 代价设为 5.0（全表最高）且要求手部偏离 p_i,des ≤ 0.05m，所以
+# q_aug 的手腕已经就是 p_i,des，而 tracking_vr_5point_local 本就含双腕。
+# =============================================================================
+
+defaults:
+  - terms/tracking_anchor_pos@_here_
+  - terms/tracking_anchor_ori@_here_
+  - terms/tracking_relative_body_pos@_here_
+  - terms/tracking_relative_body_ori@_here_
+  - terms/tracking_body_linvel@_here_
+  - terms/tracking_body_angvel@_here_
+  - terms/action_rate_l2@_here_
+  - terms/joint_limit@_here_
+  - terms/undesired_contacts@_here_
+  - terms/anti_shake_ang_vel@_here_
+  - terms/tracking_vr_5point_local@_here_
+  - terms/feet_acc@_here_
+  - terms/applied_force_tracking@_here_
+  - terms/applied_torque_tracking@_here_
+  - terms/alive@_here_
+  - terms/compliant_force_link_pos@_here_
+  - terms/compliant_force_link_ori@_here_
+
+_target_: gear_sonic.envs.manager_env.mdp.rewards.RewardsCfg
+
+# A：只改 func，权重保持与发布配置一致
+tracking_anchor_pos:
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_anchor_pos_error
+tracking_anchor_ori:
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_anchor_ori_error
+tracking_relative_body_pos:
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_relative_body_pos_error
+tracking_relative_body_ori:
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_relative_body_ori_error
+tracking_vr_5point_local:
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_local_vr_5point_error
+tracking_body_linvel:
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_body_linvel_error
+tracking_body_angvel:
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_body_angvel_error
+
+# feet_acc：仓库项文件的默认值是 -2.5e-7，但发布 checkpoint 实际训练时用的是
+# -2.5e-06（见 sonic_release/config.yaml），差 10 倍。我们冻结该 checkpoint 的 ATM
+# 只训 residual，配方应与它一致，故显式对齐到发布值。
+feet_acc:
+  weight: -2.5e-06
+
+# ── 权重配平（v12）────────────────────────────────────────────────────────────
+# term 文件里保留 SoftMimic 的原值 3.0/3.0 以便对照；这里按**我们自己的配方尺度**
+# 下调。理由：
+#
+# 1. 叠加而非配平会稀释原有项。加入前正权重合计 12.5，直接加 6.0 变 18.5 —— 所有
+#    全身跟踪项的相对影响力被压到 0.68 倍。实测 v9a(3.0/3.0) 相对 v9b(无) 的
+#    compliance 更高(0.477 vs 0.443) 但 error_joint_pos_aug 明显更差(0.227 vs 0.167)，
+#    正是全身跟踪被稀释的症状。
+# 2. 重复计数在我们这里比 SoftMimic 重。SoftMimic 的 keypoint 项覆盖 39 个点
+#    （每点 2.0/39 = 0.051），而我们的 tracking_vr_5point_local 只覆盖 5 个点
+#    （每点 0.4，浓度高 8 倍），腕部本已被重点关照。
+# 3. 受力连杆是 5point 里的**一个点**。给它与全部 5 点相同的总权重(2.0)，
+#    已经是 5 倍浓度；朝向同理对齐 tracking_relative_body_ori 的 1.0。
+#
+# 配平后正权重 15.5，稀释系数从 0.68 收敛到 0.81。
+compliant_force_link_pos:
+  weight: 2.0
+compliant_force_link_ori:
+  weight: 1.0
+
