@@ -1,0 +1,10 @@
+# 受力连杆朝向跟踪（锚定坐标系，对 q_aug）。
+# 对照 SoftMimic g1_force_control.py:196-200
+# （force_link_keypoint_orientation_tracking，σ=0.1、weight=3.0）。
+compliant_force_link_ori:
+  _target_: isaaclab.managers.RewardTermCfg
+  func: gear_sonic.envs.manager_env.mdp:compliant_force_link_ori_error
+  weight: 3.0
+  params:
+    command_name: "motion"
+    std: 0.1

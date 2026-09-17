@@ -727,6 +727,22 @@ class MotionLibBase:
         length_starts = self.length_starts[motion_ids]
         return self.body_pos_w_full[motion_steps + length_starts]
 
+    def get_body_pos_w_aug_full(self, motion_ids, motion_steps):
+        """柔顺目标 q_aug 的**全部** body 世界位置（IsaacLab 顺序）。
+
+        与 ``get_body_pos_w_full`` 平行。受力连杆未必在运动指令的 14 个 body_names
+        里（例如 shoulder_pitch 就不在），所以按受力连杆取目标时必须用 full 版。
+        """
+        if not self.has_aug_pose:
+            raise RuntimeError("动作数据里没有 'pose_aa_aug'")
+        return self.body_pos_w_aug_full[motion_steps + self.length_starts[motion_ids]]
+
+    def get_body_quat_w_aug_full(self, motion_ids, motion_steps):
+        """柔顺目标 q_aug 的**全部** body 世界朝向（wxyz，IsaacLab 顺序）。"""
+        if not self.has_aug_pose:
+            raise RuntimeError("动作数据里没有 'pose_aa_aug'")
+        return self.body_quat_w_aug_full[motion_steps + self.length_starts[motion_ids]]
+
     def get_body_quat_w_full(self, motion_ids, motion_steps):
         """Get full body quaternions (all bodies, IsaacLab order, wxyz)."""
         length_starts = self.length_starts[motion_ids]

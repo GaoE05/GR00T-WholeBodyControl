@@ -1,0 +1,10 @@
+# 受力连杆位置跟踪（锚定坐标系，对 q_aug）。
+# σ/权重取自 SoftMimic 力控实验 g1_force_control.py:191-195
+# （force_link_keypoint_tracking_local，σ=0.1、weight=3.0，是该实验权重最高的跟踪项）。
+compliant_force_link_pos:
+  _target_: isaaclab.managers.RewardTermCfg
+  func: gear_sonic.envs.manager_env.mdp:compliant_force_link_pos_error
+  weight: 3.0
+  params:
+    command_name: "motion"
+    std: 0.1

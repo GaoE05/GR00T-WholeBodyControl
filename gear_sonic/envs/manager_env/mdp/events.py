@@ -467,6 +467,14 @@ def apply_softsonic_force_field(
     env._softsonic_active = active.clone()  # noqa: SLF001
     env._softsonic_k_ff = k_ff.clone()  # noqa: SLF001  critic 特权观测用
 
+    # 受力连杆在**本资产**里的 body 索引（无力的环境填 -1）。
+    # 供 compliant_force_link_* 奖励使用 —— 对照 SoftMimic 的
+    # force_link_keypoint_tracking_local，它同样只惩罚受力连杆那一个点的误差。
+    fb = torch.full((env.num_envs,), -1, dtype=torch.long, device=env.device)
+    if active.any():
+        fb[rows] = cols
+    env._softsonic_active_force_body = fb  # noqa: SLF001
+
     # 外力缓冲是持久的，必须每步重写全部环境，否则无力环境残留上一帧
     robot.permanent_wrench_composer.set_forces_and_torques(
         forces=forces, torques=torques, body_ids=None, env_ids=None, is_global=True

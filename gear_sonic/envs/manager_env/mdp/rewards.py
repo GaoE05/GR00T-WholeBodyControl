@@ -60,6 +60,10 @@ class RewardsCfg:
     # 对 q_aug 的跟踪项复用上面已有的项名（tracking_* 系列），只在配置里把 func
     # 指向 tracking_compliant_* 版本，因此不需要新字段。下面三项是真正新增的。
     applied_force_tracking = None
+    # SoftSONIC：受力连杆位置/朝向跟踪（锚定坐标系），对照 SoftMimic 力控实验
+    # 里权重最高的 force_link_keypoint_tracking_local 及其朝向版本
+    compliant_force_link_pos = None
+    compliant_force_link_ori = None
     applied_torque_tracking = None
     alive = None
 
@@ -789,6 +793,91 @@ def tracking_compliant_body_angvel_error(
     vel_diff = command.body_ang_vel_w_aug[:, tracked] - command.robot_body_ang_vel_w[:, tracked]
     per_body_err = (vel_diff * vel_diff).sum(dim=-1)
     return torch.exp(-per_body_err.mean(dim=-1) / (std * std))
+
+
+def _force_link_anchored_target(env, command_name: str, want_quat: bool = False):
+    """受力连杆在**锚定坐标系**下的柔顺目标位姿，以及它在本资产里的 body 索引。
+
+    对照 SoftMimic 的 ``force_link_keypoint_tracking_local``
+    （``mdp/rewards.py``，力控实验里权重 3.0、σ=0.1，是该实验权重最高的跟踪项）。
+    它与我们已有的 5point/body_pos 项有三点不同，不是重复：
+      1. 只看**受力连杆**那一个点，而 5point 摊在 5 个点上、信号被稀释；
+      2. 在**锚定坐标系**下计算 —— 与力场用同一套锚定（事件里已移植），
+         这样机器人整体漂移不会污染"有没有让位到该让的地方"这个判断；
+      3. σ=0.1 只针对单点误差。
+
+    返回 ``(rows, cols, target, active)``；无活跃力场时 rows 为空。
+    """
+    from isaaclab.utils.math import quat_mul, quat_rotate
+
+    fb = getattr(env, "_softsonic_active_force_body", None)
+    if fb is None:
+        return None
+    active = fb >= 0
+    if not active.any():
+        return None
+    rows = active.nonzero(as_tuple=False).squeeze(-1)
+    cols = fb[rows]
+
+    command = env.command_manager.get_term(command_name)
+    ml = command.motion_lib
+    total = ml.get_time_step_total(command.motion_ids)
+    steps = torch.clamp(
+        command.motion_start_time_steps + command.time_steps,
+        torch.zeros_like(total), total - 1,
+    )
+    a_rot = env._softsonic_ff_anchor_rot[rows]        # noqa: SLF001
+    a_pos = env._softsonic_ff_anchor_pos[rows]        # noqa: SLF001
+    a_ref = env._softsonic_ff_anchor_ref_pos[rows]    # noqa: SLF001
+
+    tgt_pos = (
+        ml.get_body_pos_w_aug_full(command.motion_ids, steps)[rows, cols]
+        + env.scene.env_origins[rows]
+    )
+    anchored = quat_rotate(a_rot, tgt_pos - a_ref) + a_pos
+    anchored[:, 2] = tgt_pos[:, 2]                    # 只锚 XY+偏航，与力场一致
+    if not want_quat:
+        return rows, cols, anchored, active
+    tgt_quat = ml.get_body_quat_w_aug_full(command.motion_ids, steps)[rows, cols]
+    return rows, cols, (anchored, quat_mul(a_rot, tgt_quat)), active
+
+
+def compliant_force_link_pos_error(
+    env: ManagerBasedRLEnv,
+    command_name: str = "motion",
+    std: float = 0.1,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """受力连杆位置跟踪（锚定坐标系，对 q_aug）。SoftMimic 权重 3.0 / σ=0.1。"""
+    out = _force_link_anchored_target(env, command_name)
+    reward = torch.ones(env.num_envs, device=env.device)
+    if out is None:
+        return reward
+    rows, cols, target, _ = out
+    cur = env.scene[asset_cfg.name].data.body_pos_w[rows, cols]
+    err = (target - cur).norm(dim=-1)
+    reward[rows] = torch.exp(-(err * err) / (std * std))
+    return reward
+
+
+def compliant_force_link_ori_error(
+    env: ManagerBasedRLEnv,
+    command_name: str = "motion",
+    std: float = 0.1,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """受力连杆朝向跟踪（锚定坐标系，对 q_aug）。SoftMimic 权重 3.0 / σ=0.1。"""
+    from isaaclab.utils.math import quat_error_magnitude
+
+    out = _force_link_anchored_target(env, command_name, want_quat=True)
+    reward = torch.ones(env.num_envs, device=env.device)
+    if out is None:
+        return reward
+    rows, cols, (_, tgt_quat), _ = out
+    cur = env.scene[asset_cfg.name].data.body_quat_w[rows, cols]
+    err = quat_error_magnitude(tgt_quat, cur)
+    reward[rows] = torch.exp(-(err * err) / (std * std))
+    return reward
 
 
 def applied_force_tracking_error(env: ManagerBasedRLEnv, std: float = 20.0) -> torch.Tensor:
