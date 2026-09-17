@@ -3080,6 +3080,37 @@ class TrackingCommand(CommandTerm):
         root_lin_vel = self.body_lin_vel_w[:, 0].clone()
         root_ang_vel = self.body_ang_vel_w[:, 0].clone()
 
+        # ── SoftSONIC：从柔顺目标 q_aug 初始化（根位姿 + 根速度 + 关节角/速度）──
+        # 为什么默认从 q_aug 而不是 q_ref：
+        #   1. 无外力时 q_aug 严格等于 q_ref（实测关节偏差中位 0.000°），所以这是
+        #      q_ref 初始化的严格推广，约 30% 的帧上两者相同。
+        #   2. 事件中途从 q_ref 初始化是**物理上不自洽**的：力已在峰值而机器人却在
+        #      未退让的位姿，力场会立刻施加 F·(1+k_ff/k_robot) ≈ 3 倍的力，这个剧烈
+        #      瞬态在目标行为里根本不存在。q_aug(t) 才是"一直在柔顺退让的机器人此刻
+        #      该在的位姿"，与该帧的力自洽。
+        #   3. RSI 的本意是从**目标**状态分布采样，而我们的目标轨迹就是 q_aug。
+        # 退让瞬态不会因此练不到：episode 10 秒 / 500 步，事件时长 2~4 秒、间隔
+        # 0.5~1.5 秒，每个 episode 都含多次完整的施力起始；RSI 只影响第 0 帧。
+        #
+        # 四个量必须一起换。只换关节角会留下不自洽的根位姿 —— q_aug 的骨盆相对
+        # q_ref 中位移动 10.5cm、p90 达 26.4cm，不是可以忽略的量。
+        compliant_joint_pos = None
+        compliant_joint_vel = None
+        if getattr(self.cfg, "reset_from_compliant_target", False):
+            if not self.motion_lib.has_aug_pose:
+                raise RuntimeError(
+                    "reset_from_compliant_target=True 但动作数据里没有 pose_aa_aug。"
+                    "用 scripts/cma_to_motionlib.py --with-softsonic 重新生成。"
+                )
+            steps = self.motion_start_time_steps + self.time_steps
+            root_pos = self.body_pos_w_aug[:, 0].clone()
+            root_ori = self.body_quat_w_aug[:, 0].clone()
+            root_lin_vel = self.body_lin_vel_w_aug[:, 0].clone()
+            root_ang_vel = self.body_ang_vel_w_aug[:, 0].clone()
+            compliant_joint_pos = self.motion_lib.get_dof_pos_aug(self.motion_ids, steps)
+            compliant_joint_vel = self.motion_lib.get_dof_vel_aug(self.motion_ids, steps)
+        # ── /SoftSONIC ─────────────────────────────────────────────────────
+
         self.running_ref_root_height[env_ids] = self.anchor_pos_w[env_ids, 2]
 
         # Skip reset randomizations during evaluation — they cause visible stumbling
@@ -3110,8 +3141,14 @@ class TrackingCommand(CommandTerm):
             root_ang_vel[env_ids] += rand_samples[:, 3:]
 
         # Handle DOF mismatch between motion library and robot
-        motion_lib_joint_pos = self.joint_pos.clone()  # Shape: [num_envs, motion_lib_num_dof]
-        motion_lib_joint_vel = self.joint_vel.clone()  # Shape: [num_envs, motion_lib_num_dof]
+        motion_lib_joint_pos = (
+            compliant_joint_pos.clone() if compliant_joint_pos is not None
+            else self.joint_pos.clone()
+        )  # Shape: [num_envs, motion_lib_num_dof]
+        motion_lib_joint_vel = (
+            compliant_joint_vel.clone() if compliant_joint_vel is not None
+            else self.joint_vel.clone()
+        )
 
         if self.has_dof_mismatch:
             # Create full robot joint tensors and map using name-based indices
@@ -4142,6 +4179,10 @@ class TrackingCommandCfg(CommandTermCfg):
     sampling probabilities (G1/SMPL/teleop), episode initialization strategy,
     object handling, and debug visualization marker styles.
     """
+
+    # SoftSONIC：reset 时用柔顺目标 q_aug 的关节角初始化而非 q_ref。
+    # 理由见 _reset 里该分支的注释。要求动作数据带 pose_aa_aug 字段。
+    reset_from_compliant_target: bool = False
 
     class_type: type = TrackingCommand
 

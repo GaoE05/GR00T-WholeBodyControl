@@ -665,6 +665,14 @@ class MotionLibBase:
             )
         return self.body_quat_w_aug[motion_steps + self.length_starts[motion_ids]]
 
+    def get_dof_pos_aug(self, motion_ids, motion_steps):
+        """取柔顺目标 q_aug 的关节角（IsaacLab 顺序），供从 q_aug 初始化的 reset 使用。"""
+        return self.dof_pos_aug[motion_steps + self.length_starts[motion_ids]]
+
+    def get_dof_vel_aug(self, motion_ids, motion_steps):
+        """取柔顺目标 q_aug 的关节速度（IsaacLab 顺序）。"""
+        return self.dof_vel_aug[motion_steps + self.length_starts[motion_ids]]
+
     def get_body_lin_vel_w_aug(self, motion_ids, motion_steps):
         """取柔顺目标 q_aug 的连杆线速度（与 get_body_lin_vel_w 平行）。"""
         return self.body_lin_vel_w_aug[motion_steps + self.length_starts[motion_ids]]
@@ -1174,6 +1182,8 @@ class MotionLibBase:
         _motion_aug_quat = []
         _motion_aug_linvel = []
         _motion_aug_angvel = []
+        _motion_aug_dof = []
+        _motion_aug_dof_vel = []
         _motion_smpl_poses = []
         _motion_smpl_joints = []
         _motion_smpl_transl = []
@@ -1486,6 +1496,8 @@ class MotionLibBase:
                 _motion_aug_quat.append(curr_motion.aug_global_rotation)
                 _motion_aug_linvel.append(curr_motion.aug_global_velocity)
                 _motion_aug_angvel.append(curr_motion.aug_global_angular_velocity)
+                _motion_aug_dof.append(curr_motion.aug_dof_pos)
+                _motion_aug_dof_vel.append(curr_motion.aug_dof_vel)
             if self.smpl_data is not None:
                 _motion_smpl_poses.append(curr_motion["smpl_pose"])
                 if "smpl_joints" in curr_motion:
@@ -1632,6 +1644,8 @@ class MotionLibBase:
             self.body_ang_vel_w_aug = (
                 torch.cat(_motion_aug_angvel, dim=0).float().to(self._device)
             )
+            self.dof_pos_aug = torch.cat(_motion_aug_dof, dim=0).float().to(self._device)
+            self.dof_vel_aug = torch.cat(_motion_aug_dof_vel, dim=0).float().to(self._device)
         self.body_quat_w = (
             torch.cat([m.global_rotation for m in motions], dim=0).float().to(self._device)
         )
@@ -1749,6 +1763,9 @@ class MotionLibBase:
 
         if "mujoco_to_isaaclab_body" in self.m_cfg.keys():  # noqa: SIM118
             self.dof_pos = self.dof_pos[:, self.m_cfg.mujoco_to_isaaclab_dof]
+            if self.has_aug_pose:
+                self.dof_pos_aug = self.dof_pos_aug[:, self.m_cfg.mujoco_to_isaaclab_dof]
+                self.dof_vel_aug = self.dof_vel_aug[:, self.m_cfg.mujoco_to_isaaclab_dof]
             self.dof_vel = self.dof_vel[:, self.m_cfg.mujoco_to_isaaclab_dof]
 
             # Keep full body data (all bodies, IsaacLab order) before slicing
@@ -2347,6 +2364,10 @@ class MotionLibBase:
                     curr_motion.aug_global_angular_velocity = aug_out[
                         "global_angular_velocity"
                     ].squeeze(0)
+                    # 关节角：供"从 q_aug 初始化"的 reset 使用。fk_batch 已经算好，
+                    # 不必再从 pose_aa_aug 反解。
+                    curr_motion.aug_dof_pos = aug_out["dof_pos"].squeeze(0)
+                    curr_motion.aug_dof_vel = aug_out["dof_vels"].squeeze(0)
                 if self.has_softsonic:
                     raw_ss = to_torch(curr_file[SOFTSONIC_FIELD]).clone()[start:end]
                     # 必须重采样到与 fk_batch 输出相同的帧数。curr_file 里的字段是
