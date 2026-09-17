@@ -205,9 +205,13 @@ def apply_softsonic_force_field(
     from isaaclab.assets import Articulation as _Articulation
     from isaaclab.utils.math import (
         axis_angle_from_quat,
+        euler_xyz_from_quat,
         quat_from_angle_axis,
+        quat_from_euler_xyz,
         quat_inv,
         quat_mul,
+        quat_rotate,
+        wrap_to_pi,
     )
 
     from gear_sonic.utils.motion_lib import motion_lib_base as _mlb
@@ -259,6 +263,51 @@ def apply_softsonic_force_field(
     forces = torch.zeros(env.num_envs, robot.num_bodies, 3, device=env.device)
     torques = torch.zeros_like(forces)
 
+    # ── 力场锚定（移植自 SoftMimic） ─────────────────────────────────────────
+    # compliance_augmented_reference_command.py:366-435 的
+    # "anchor forcefield to the robot's state at the start of an interaction"。
+    #
+    # 为什么必须这么做：把设定点直接锚在**当前参考连杆位置**上，机器人根部相对参考
+    # 的累积跟踪误差会原样变成额外的力。实测 error_anchor_pos ≈ 0.141m，乘 k_ff≈94
+    # 约合 13.3N 的虚假力，而总 force_err 才 19.0N —— 大部分"额外的力"根本不是
+    # 机器人硬扛出来的，是漂移造成的假象（这也是 force_ratio 4.26 越过刚性极限
+    # 3.09 的原因）。
+    #
+    # SoftMimic 的做法是在力事件的**上升沿**记录机器人实际根位姿与参考根位姿，
+    # 之后整个事件期间按 O_new = R_delta·(O_data - P_ref_start) + P_robot_start
+    # 把力场几何搬到机器人所在的位置。只补偿平移与偏航、Z 保持数据原值。
+    _ANCHOR_K_EPS = 0.1  # 与 SoftMimic 的 rising-edge 阈值一致
+    last_k = getattr(env, "_softsonic_last_k_ff", None)
+    if last_k is None or last_k.shape[0] != env.num_envs:
+        last_k = torch.zeros(env.num_envs, device=env.device)
+        env._softsonic_ff_anchor_pos = torch.zeros(env.num_envs, 3, device=env.device)  # noqa: SLF001
+        env._softsonic_ff_anchor_ref_pos = torch.zeros(env.num_envs, 3, device=env.device)  # noqa: SLF001
+        env._softsonic_ff_anchor_rot = torch.zeros(env.num_envs, 4, device=env.device)  # noqa: SLF001
+        env._softsonic_ff_anchor_rot[:, 0] = 1.0  # noqa: SLF001  单位四元数
+
+    # episode 刚 reset 的环境必须重新锚定，否则会沿用上一条 episode 的锚点。
+    # 对应 SoftMimic 在 reset()/reset_motions() 里把 _last_ff_stiffness 清零。
+    just_reset = env.episode_length_buf <= 1
+    last_k = torch.where(just_reset, torch.zeros_like(last_k), last_k)
+
+    ref_root_pos = (
+        motion_lib.get_body_pos_w_full(command.motion_ids, steps)[:, 0]
+        + env.scene.env_origins
+    )
+    ref_root_quat = motion_lib.get_body_quat_w_full(command.motion_ids, steps)[:, 0]
+
+    rising = (last_k < _ANCHOR_K_EPS) & (k_ff >= _ANCHOR_K_EPS)
+    if rising.any():
+        ids = rising.nonzero(as_tuple=False).squeeze(-1)
+        _, _, yaw_now = euler_xyz_from_quat(robot.data.root_quat_w[ids])
+        _, _, yaw_ref = euler_xyz_from_quat(ref_root_quat[ids])
+        d_yaw = wrap_to_pi(yaw_now - yaw_ref)
+        zeros = torch.zeros_like(d_yaw)
+        env._softsonic_ff_anchor_rot[ids] = quat_from_euler_xyz(zeros, zeros, d_yaw)  # noqa: SLF001
+        env._softsonic_ff_anchor_pos[ids] = robot.data.root_pos_w[ids]  # noqa: SLF001
+        env._softsonic_ff_anchor_ref_pos[ids] = ref_root_pos[ids]  # noqa: SLF001
+    env._softsonic_last_k_ff = k_ff.clone()  # noqa: SLF001
+
     if active.any():
         rows = active.nonzero(as_tuple=False).squeeze(-1)
         cols = body_id_lut[canon[rows]]
@@ -270,11 +319,20 @@ def apply_softsonic_force_field(
         ref_pos = ref_pos_full[rows, cols] + env.scene.env_origins[rows]
         ref_quat = ref_quat_full[rows, cols]
 
+        # 施加锚定变换：把参考连杆位姿搬到"事件起始时机器人所在"的坐标系下。
+        a_rot = env._softsonic_ff_anchor_rot[rows]  # noqa: SLF001
+        a_pos = env._softsonic_ff_anchor_pos[rows]  # noqa: SLF001
+        a_ref = env._softsonic_ff_anchor_ref_pos[rows]  # noqa: SLF001
+        anchored = quat_rotate(a_rot, ref_pos - a_ref) + a_pos
+        anchored[:, 2] = ref_pos[:, 2]   # 只锚 XY+偏航，Z 保持数据原值
+        ref_pos = anchored
+        ref_quat = quat_mul(a_rot, ref_quat)
+
         hand_pos = robot.data.body_pos_w[rows, cols]
         hand_quat = robot.data.body_quat_w[rows, cols]
 
-        # 线性：F = k_ff · (设定点 - 实际手位)
-        setpoint_pos = ref_pos + delta_p[rows]
+        # 线性：F = k_ff · (设定点 - 实际手位)。偏移量也要跟着偏航一起转。
+        setpoint_pos = ref_pos + quat_rotate(a_rot, delta_p[rows])
         f = k_ff[rows, None] * (setpoint_pos - hand_pos)
 
         # 旋转：设定点朝向 = Rot(delta_rv) · 参考朝向，力矩 = k_ff_rot · rotvec(误差)
@@ -328,11 +386,23 @@ def apply_softsonic_force_field(
                 ratio = (
                     (got[sig] / want[sig]).mean().item() if sig.any() else float("nan")
                 )
+                # 锚定诊断：drift 是机器人根部相对参考的偏离，corr 是锚定实际
+                # 搬动力场的距离。若 body 0 不是根连杆，drift 会是个离谱的大数。
+                drift = (robot.data.root_pos_w - ref_root_pos).norm(dim=-1)
+                corr = (
+                    quat_rotate(
+                        env._softsonic_ff_anchor_rot[active],  # noqa: SLF001
+                        ref_root_pos[active] - env._softsonic_ff_anchor_ref_pos[active],  # noqa: SLF001
+                    )
+                    + env._softsonic_ff_anchor_pos[active]  # noqa: SLF001
+                    - ref_root_pos[active]
+                )[:, :2].norm(dim=-1)
                 print(  # noqa: T201
                     f"[softsonic ff] step {counter}: 活跃 {int(active.sum())}/{env.num_envs}，"
                     f"期望力 {want.mean():.2f} N，实际力 {got.mean():.2f} N，"
                     f"比值 {ratio:.2f}（仅统计期望力>1N 的环境；"
                     "完全刚性的理论极限是 1 + k_ff/k_robot）"
+                    f"；根部漂移 {drift.mean():.3f} m，锚定修正 {corr.mean():.3f} m"
                 )
             else:
                 print(f"[softsonic ff] step {counter}: 无活跃力场")  # noqa: T201
