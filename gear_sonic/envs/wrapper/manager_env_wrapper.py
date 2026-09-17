@@ -633,12 +633,26 @@ class ManagerEnvWrapper:
     def step(self, actions):
         if self.action_transform_module is not None:
             # Use provided obs_dict or fall back to stored obs from last reset/step
-            # 只取一次值再判空。原写法是 `if "obs_dict" in actions:` 然后
-            # `actions["obs_dict"].copy()` —— 普通 PPO 训练器会传 obs_dict=None
-            # （键存在但值为空），于是对 None 调 .copy() 报错。
-            # 也不要写成 `if actions.get(...) is not None: actions[...].copy()`：
-            # actions 未必是普通 dict，get 与 [] 的语义可能不一致，两次查找不可靠。
-            provided_obs = actions.get("obs_dict", None) if hasattr(actions, "get") else None
+            # actions 是 TensorDict，obs_dict 这个非张量值被包成了 NonTensorData。
+            # 三种写法都不行（都实际踩过）：
+            #   `if "obs_dict" in actions: actions["obs_dict"].copy()`
+            #       TensorDict 的 [] 会自动解包，得到训练器实际传的 None，
+            #       对 None 调 .copy() 报 AttributeError —— 这是原代码的 bug；
+            #   `actions.get("obs_dict")`
+            #       返回 NonTensorData **包装对象**，非 None 但没有 actor_obs 键，
+            #       后面报 "Invalid indexing arguments: actor_obs"；
+            #   只判 None 不判类型
+            #       任何非 dict 的值都会被当成有效观测喂给 ATM。
+            # 所以三步都不能省：取值 -> 解包 .data -> 校验确实是 dict。
+            # 运行期实测：actions 的键是 [action_mean, action_sigma, actions,
+            # actions_log_prob, obs_dict]，而 _last_obs_dict 是普通 dict，
+            # 键为 [actor_obs, critic_obs, tokenizer]，正是 ATM 需要的形状。
+            provided_obs = None
+            if hasattr(actions, "get"):
+                raw_obs = actions.get("obs_dict", None)
+                raw_obs = getattr(raw_obs, "data", raw_obs)  # NonTensorData -> 原对象
+                if isinstance(raw_obs, dict):
+                    provided_obs = raw_obs
             if provided_obs is not None:
                 obs_dict = provided_obs.copy()
             else:
@@ -710,6 +724,12 @@ class ManagerEnvWrapper:
                 # Teacher/residual mode: policy outputs residual that's added to ATM encoded tokens
                 # Apply scaling to residual before passing to ATM
                 scaled_residual = tokenizer_meta_actions * self._latent_residual_scale
+                # SoftSONIC 的核心诊断量。判据（见 notes/training-config.md）：
+                #   无外力时 ‖Δz‖ 应趋近 0（说明 residual 只在需要时介入）；
+                #   1~2k 迭代后仍全程趋近 0 说明学习率太低；
+                #   接近 action_clip_value × scale 说明顶到上限，该调低 scale 或 lr。
+                # 与 FSQ 的量化步长 0.0625、token 值域 [-1, 0.9375] 对照着看。
+                self.env._softsonic_residual_norm = scaled_residual.norm(dim=-1)  # noqa: SLF001
                 # Add residual in latent/token space (after encoding, before decoding)
                 body_actions = self.action_transform_module(
                     atm_obs_dict,
@@ -978,6 +998,29 @@ class ManagerEnvWrapper:
                 extras["to_log"]["adp_samp/episodes_max_over_mean"] = (
                     self._motion_lib.adp_samp_num_episodes.max() / eps_mean
                 )
+        # SoftSONIC：latent residual 的幅值统计
+        rnorm = getattr(self.env, "_softsonic_residual_norm", None)
+        if rnorm is not None:
+            extras.setdefault("to_log", {})
+            extras["to_log"]["softsonic/residual_norm_mean"] = rnorm.mean()
+            extras["to_log"]["softsonic/residual_norm_max"] = rnorm.max()
+            active = getattr(self.env, "_softsonic_active", None)
+            if active is not None and active.any():
+                extras["to_log"]["softsonic/residual_norm_forced"] = rnorm[active].mean()
+                if (~active).any():
+                    extras["to_log"]["softsonic/residual_norm_idle"] = rnorm[~active].mean()
+            fa = getattr(self.env, "_softsonic_force_actual", None)
+            fd = getattr(self.env, "_softsonic_force_desired", None)
+            if fa is not None and fd is not None and active is not None and active.any():
+                want = fd[active].norm(dim=-1)
+                got = fa[active].norm(dim=-1)
+                sig = want > 1.0
+                if sig.any():
+                    # 核心评价指标：训练应把它驱向 1.0（完全刚性的理论极限是
+                    # 1 + k_ff/k_robot，实测约 3.09）
+                    extras["to_log"]["softsonic/force_ratio"] = (got[sig] / want[sig]).mean()
+                    extras["to_log"]["softsonic/force_err_N"] = (got[sig] - want[sig]).abs().mean()
+
         new_obs = self.process_raw_obs(obs_dict, flatten_dict_obs=True)
         # Store obs for action_transform_module when obs_dict is not provided in next step()
         self._last_obs_dict = new_obs
