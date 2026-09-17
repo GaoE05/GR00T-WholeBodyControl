@@ -70,11 +70,23 @@ manager_env:
     # post_quantization：pre_quantization 下小于半个量化步长（0.031）的 residual
     # 会被量化器抹掉，存在死区，做不了精细柔顺控制。
     latent_residual_mode: post_quantization
-    # FSQ token 值域只有 [-1, 0.9375]、量化步长 0.0625。scale × init_noise_std 的
-    # 乘积决定初始探索幅度，目标是 residual 标准差 ≈ 0.05（约 0.8 个量化步长）。
-    latent_residual_scale: 0.05
-    # 20.0 × 0.05 = 1.0 正好是整个 token 值域，对"修正量"余量过大；收到 3.0 后
-    # residual 上限 0.15（约 2.4 个量化步长）。
+    # 取值依据是 scripts/probe_residual_feasibility.py 的实测（见
+    # notes/run-k39lnrxc-diagnosis.md）：在冻结解码器上直接对 Δz 做梯度下降，
+    # 要复现 q_aug-q_ref 这个关节增量，**无约束解需要每维中位 0.146**。
+    #
+    # v1 用 scale=0.05 + clip=3.0，上限恰好 0.15 —— 正好压在需求的中位数上，
+    # 49.6% 的维度顶到上限，裁剪解每维全部饱和。这是 v1 学不动的原因之一。
+    #
+    # 改成 0.15 的作用是缩短**均值要走的距离**：要达到每维 0.146，raw 均值从
+    # 约 3.0（σ=0.4 下在 7σ 之外，PPO 实际走不到）降到约 1.0，只需 2~3σ。
+    latent_residual_scale: 0.15
+    # latent residual 的逐维上限。**不要**用 action_clip_value 推算这个数 ——
+    # 它裁的是 ATM 解码之后的 29 维关节动作，对 latent 没有约束；
+    # universal_token_modules.py:890 的 `all_tokens + residual_reshaped` 也不截断。
+    # 0.5 ≈ 7.8 个量化步长、约占 token 值域 [-1, 0.9375] 的 26%，覆盖实测需求
+    # （每维中位 0.146）且留足余量，同时挡住均值跑飞导致解码器外推。
+    latent_residual_clip: 0.5
+    # 作用于解码后的关节目标（±3.0 rad，配合 use_default_offset）。
     action_clip_value: 3.0
 
   commands:
@@ -102,19 +114,34 @@ algo:
     max_grad_norm: 0.1             # 发布配置的值（比 ppo_im_phc 默认的 1.0 紧）
     use_clampped_std: true
     std_clamp_min: 0.001
-    std_clamp_max: 0.5
+    # v1 的 init_noise_std=1.0 在 std_clamp_max=0.5 之外，从第一次前向就被
+    # in-place clamp_ 截到 0.5；熵奖励(0.01)持续把 σ 往上顶、clamp 再压回来，
+    # σ 被钉死 —— 实测 loss/entropy_avg 逐位恒为 46.450649
+    # （= 64×(½ln2πe+ln0.5)）达 950 迭代。上限放宽到 0.6 且初值落在区间内，
+    # 熵系数调小，让 σ 能真正自适应。
+    std_clamp_max: 0.6
     empty_cache_every_n_ppo_epoch: -1
 
     # 学习率取 SONIC(2e-5) 与 SoftMimic(1e-3) 之间。前者的 actor 就是预训练基模
     # 所以极小，后者是从零训的小 MLP。我们是新的零初始化 head 但输出喂进脆弱的
     # 冻结隐空间，故折中。诊断量是 ‖Δz‖：1~2k 迭代后仍趋近 0 就调高。
+    # 经 config/algo/trl/ppo.yaml:3 的插值 `learning_rate: ${algo.config.actor_learning_rate}`
+    # 进入 TRL 的 PPOConfig，是**唯一**生效的学习率。
+    # （`critic_learning_rate` 是死键：yaml 与代码里都没有任何地方读它，
+    #   actor 与 critic 共用同一个优化器学习率。）
     actor_learning_rate: 1.e-4
-    adaptive_lr_min: 1.e-5
-    adaptive_lr_max: 5.e-4
+    # 关掉自适应 KL 调度。v1 实测 approxkl 长期 0.0145~0.017、
+    # 落在死区(0.005~0.02)内却仍把 lr 在 2.3e-5~5e-4 之间乱甩，说明逐 minibatch
+    # 的 KL 方差极大。固定学习率换一个可控的对照，安全性交给 max_grad_norm=0.1。
+    desired_kl: null
 
-    # 与 latent_residual_scale=0.05 相乘得初始 residual 标准差 0.05。
-    # 若用 SONIC 默认的 0.05，乘积是 0.0025 —— 只有一个量化步长的 4%，等于没有探索。
-    init_noise_std: 1.0
+    # 0.4 × scale 0.15 = 每维 0.06 的初始探索噪声（约 0.93 个量化步长，
+    # 按 probe_residual_authority 实测约合关节目标 0.11 rad RMS）。落在
+    # std_clamp_max=0.6 之内，σ 可升可降。
+    init_noise_std: 0.4
+    # 熵奖励从 ppo_im_phc 的 0.01 调小：residual head 最终应收敛到一个较确定的
+    # 偏移量，过强的熵奖励会一直把 σ 顶在上界（v1 即如此）。
+    entropy_coef: 0.002
 
     actor:
       backbone:

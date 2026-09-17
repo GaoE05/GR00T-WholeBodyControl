@@ -4,6 +4,8 @@ import numpy as np
 from omegaconf import OmegaConf
 import omni
 from pxr import Gf, UsdGeom
+import os
+
 import torch
 from loguru import logger
 from gear_sonic.trl.utils.common import custom_instantiate
@@ -96,6 +98,12 @@ class ManagerEnvWrapper:
         # Latent residual options (only used when use_latent_residual=True)
         self._latent_residual_mode = self.config.get("latent_residual_mode", "post_quantization")
         self._latent_residual_scale = self.config.get("latent_residual_scale", 1.0)
+        # SoftSONIC：latent residual 的逐维上限。注意 action_clip_value 裁的是 ATM
+        # **解码之后**的关节动作，对 latent 没有任何约束；而 universal_token_modules
+        # 里 `all_tokens = all_tokens + residual_reshaped` 也不截断。FSQ 码字值域只有
+        # [-1, 0.9375]，residual 无界意味着 token 可以被推到训练分布之外，解码器在那里
+        # 是纯外推。设为 None 保持原行为。
+        self._latent_residual_clip = self.config.get("latent_residual_clip", None)
 
         # Student direct latent mode: policy outputs FULL latent (not residual)
         # This is used for vision student policies that learned to output full latent
@@ -106,7 +114,7 @@ class ManagerEnvWrapper:
         if self._use_latent_residual:
             logger.info(
                 f"Latent residual enabled: mode={self._latent_residual_mode}, "
-                f"scale={self._latent_residual_scale}"
+                f"scale={self._latent_residual_scale}, clip={self._latent_residual_clip}"
             )
 
         if self._use_student_direct_latent:
@@ -334,6 +342,17 @@ class ManagerEnvWrapper:
 
         return finger_targets
 
+    def _clip_latent_residual(self, scaled_residual):
+        """把缩放后的 latent residual 逐维截断到 ``latent_residual_clip``。
+
+        未配置时原样返回。截断作用在 latent 上而不是关节动作上 —— ``action_clip_value``
+        管的是 ATM 解码之后的 29 维关节目标，拦不住 token 跑出 FSQ 的有效值域。
+        """
+        if self._latent_residual_clip is None:
+            return scaled_residual
+        c = self._latent_residual_clip
+        return scaled_residual.clamp(-c, c)
+
     def _prepare_obs_for_action_transform_module(self, obs_dict):
         """Use policy_atm observations for ATM if DOF mismatch exists, else use policy."""
         if not self._use_policy_atm_group or "policy_atm" not in obs_dict:
@@ -347,6 +366,33 @@ class ManagerEnvWrapper:
         for k, v in atm_obs_dict.items():
             if isinstance(v, torch.Tensor) and v.dim() == 2:
                 atm_obs_dict[k] = v.unsqueeze(1)  # Add seq_len=1 dimension
+
+        # SoftSONIC 诊断钩子：把一批真实的 ATM 观测存盘，供离线探针使用。
+        # 只在设置了 SOFTSONIC_DUMP_ATM_OBS 时触发，且只导出一次，对训练无影响。
+        # 用真实观测（而非随机张量）才能测准 FSQ 量化后 token 对 residual 的灵敏度。
+        dump_path = os.environ.get("SOFTSONIC_DUMP_ATM_OBS")
+        if dump_path and not getattr(self, "_softsonic_atm_obs_dumped", False):
+            self._softsonic_atm_obs_dumped = True
+            payload = {k: v.detach().cpu() for k, v in atm_obs_dict.items()
+                       if isinstance(v, torch.Tensor)}
+            # 一并存下柔顺目标与参考关节角，供可行性测试使用：
+            # 问题是"冻结解码器的像空间里存不存在一个 Δz 使输出达到 q_aug"。
+            # 动作项是 JointPositionAction + use_default_offset，scale=1，
+            # 故 a_target = q_aug - default_joint_pos。
+            try:
+                cmd = self.env.command_manager.get_term("motion")
+                steps = cmd.motion_start_time_steps + cmd.time_steps
+                robot = self.env.scene["robot"]
+                payload["dof_pos_aug"] = cmd.motion_lib.get_dof_pos_aug(
+                    cmd.motion_ids, steps).detach().cpu()
+                payload["dof_pos_ref"] = cmd.motion_lib.get_dof_pos(
+                    cmd.motion_ids, steps).detach().cpu()
+                payload["default_joint_pos"] = robot.data.default_joint_pos.detach().cpu()
+                payload["joint_names"] = list(robot.data.joint_names)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[SoftSONIC] 柔顺目标导出失败: {exc}")
+            torch.save(payload, dump_path)
+            logger.info(f"[SoftSONIC] dumped ATM obs batch -> {dump_path}")
 
         return atm_obs_dict
 
@@ -723,12 +769,14 @@ class ManagerEnvWrapper:
             elif action_mode == "residual":
                 # Teacher/residual mode: policy outputs residual that's added to ATM encoded tokens
                 # Apply scaling to residual before passing to ATM
-                scaled_residual = tokenizer_meta_actions * self._latent_residual_scale
+                scaled_residual = self._clip_latent_residual(
+                    tokenizer_meta_actions * self._latent_residual_scale
+                )
                 # SoftSONIC 的核心诊断量。判据（见 notes/training-config.md）：
                 #   无外力时 ‖Δz‖ 应趋近 0（说明 residual 只在需要时介入）；
                 #   1~2k 迭代后仍全程趋近 0 说明学习率太低；
-                #   接近 action_clip_value × scale 说明顶到上限，该调低 scale 或 lr。
-                # 与 FSQ 的量化步长 0.0625、token 值域 [-1, 0.9375] 对照着看。
+                #   接近 latent_residual_clip×√64 说明顶到上限，该放宽上限或调低 lr。
+                # 与 FSQ 的量化步长 0.0645、token 值域 [-1, 0.9375] 对照着看。
                 self.env._softsonic_residual_norm = scaled_residual.norm(dim=-1)  # noqa: SLF001
                 # Add residual in latent/token space (after encoding, before decoding)
                 body_actions = self.action_transform_module(
@@ -781,7 +829,9 @@ class ManagerEnvWrapper:
                         if obs_key in atm_obs_dict:
                             teacher_atm_obs[obs_key] = atm_obs_dict[obs_key][teacher_indices]
 
-                    scaled_residual = teacher_latent * self._latent_residual_scale
+                    scaled_residual = self._clip_latent_residual(
+                        teacher_latent * self._latent_residual_scale
+                    )
                     teacher_body_actions = self.action_transform_module(
                         teacher_atm_obs,
                         latent_residual=scaled_residual,
