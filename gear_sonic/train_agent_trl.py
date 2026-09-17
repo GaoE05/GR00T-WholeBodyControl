@@ -500,6 +500,16 @@ def main(config: OmegaConf):
     # Training loop
     trainer.train()
 
+    # SoftSONIC：训练结束后收尾记录器。TrajectoryRecorderTerm 只在 close_writers()
+    # 里落盘，而它仅由 end_render_results() 调用 —— 训练模式从不调用，于是
+    # recorders=trajectory 时轨迹永远不会被保存。导出轨迹供 MuJoCo 回放需要它
+    # （IsaacLab 的相机渲染在本机双卡环境下崩溃，见 AGENTS.md）。
+    try:
+        if hasattr(env, "end_render_results"):
+            env.end_render_results()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"end_render_results 失败: {exc}")
+
     if simulator_type == "IsaacSim":
         os._exit(0)
 

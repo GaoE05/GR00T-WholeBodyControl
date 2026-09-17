@@ -1,0 +1,10 @@
+# 只记录轨迹、不开相机。用于绕开 IsaacLab 的相机渲染崩溃：
+# 导出 dof_pos / root_pos_w / root_quat_w 后在 MuJoCo 里回放合成对比视频。
+# 上游 TrajectoryRecorderTerm 的文档原话即 "enabling kinematic replay in
+# multi-scene composite renders"，正是为此而设。
+
+_target_: gear_sonic.envs.manager_env.mdp.recorders.RecordersCfg
+
+trajectory:
+  _target_: gear_sonic.envs.manager_env.mdp.recorders.TrajectoryRecorderCfg
+  save_path: ${manager_env.config.save_rendering_dir}
