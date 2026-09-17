@@ -1,0 +1,127 @@
+# @package _global_
+# =============================================================================
+# SoftSONIC v1：冻结 SONIC 的 ATM，训练一个零初始化的柔顺 residual head
+# =============================================================================
+#
+# 架构：
+#   参考动作 q_ref ─► [冻结的 SONIC ATM] 编码 ─► FSQ 量化 ─┐
+#                                                          ├─(+)─► 解码 ─► 关节目标
+#   本体感知历史 ──► [新训的 residual head] ──── Δz ────────┘
+#
+# ATM 由 env wrapper 侧加载（action_transform_module_cfg/_checkpoint），不在优化器
+# 参数列表里，且 env.step() 在 PPO 计算图之外 —— 构造上即冻结。
+#
+# 依据文档：
+#   notes/training-config.md         reset 策略与超参的取值理由
+#   notes/reward-mapping.md          奖励逐项对照与合理性审计
+#   notes/sonic-compliance-findings.md  FSQ 数值范围等实测事实
+# =============================================================================
+
+defaults:
+  - /algo: ppo_im_phc
+  - /manager_env: base_env
+  - /callbacks/read_eval
+  - /callbacks/im_resample
+  # 不引入 aux_losses：L_recon/L_token/L_cycle 更新的是编码器与运动解码器 D^r，
+  # ATM 冻结后它们轻则空耗算力，重则与冻结冲突。
+  - override /trainer: trl
+  # residual head 是普通 MLP，不是 ATM（ATM 在 env 侧）
+  - override /actor_critic: mlp
+  - override /manager_env/observations/tokenizer: unitoken_all_noz
+  - override /manager_env/observations/policy: local_dir_hist
+  - override /manager_env/observations/critic: privileged_mf_hist
+  - override /manager_env/events: tracking/softsonic
+  - override /manager_env/terminations: tracking/softsonic
+  - override /manager_env/rewards: tracking/softsonic
+
+use_manager_env: true
+
+exp_base: ${hydra:runtime.choices.exp}
+exp_var: v1
+experiment_name: ${exp_base}_${exp_var}
+experiment_dir: ${base_dir}/${project_name}/${experiment_name}-${timestamp}
+
+# 单 GPU（RTX PRO 5000 72GB）。SoftMimic 用 4096，先按它试，显存不够退 2048。
+num_envs: 4096
+project_name: SoftSONIC_PRO5000
+
+actor_prop_history_length: 10
+actor_actions_history_length: 10
+critic_prop_history_length: 10
+critic_actions_history_length: 10
+
+manager_env:
+  config:
+    robot:
+      type: g1_model_12_dex
+    terrain_type: trimesh
+
+    # ── 冻结的 ATM ──────────────────────────────────────────────────────────
+    # atm_export.yaml 由 scripts/export_atm_config.py 从 sonic_release/config.yaml
+    # 生成（NVIDIA 未发布导出脚本，自己写的）。
+    action_transform_module_cfg: sonic_release/atm_export.yaml
+    action_transform_module_checkpoint: sonic_release/last.pt
+
+    # ── residual 注入 ───────────────────────────────────────────────────────
+    # 动作 = 64 维 latent residual（无手部动作，实测动作空间是 29）
+    meta_action_dim: 64
+    tokenizer_action_dim: 64
+    use_latent_residual: true
+    # post_quantization：pre_quantization 下小于半个量化步长（0.031）的 residual
+    # 会被量化器抹掉，存在死区，做不了精细柔顺控制。
+    latent_residual_mode: post_quantization
+    # FSQ token 值域只有 [-1, 0.9375]、量化步长 0.0625。scale × init_noise_std 的
+    # 乘积决定初始探索幅度，目标是 residual 标准差 ≈ 0.05（约 0.8 个量化步长）。
+    latent_residual_scale: 0.05
+    # 20.0 × 0.05 = 1.0 正好是整个 token 值域，对"修正量"余量过大；收到 3.0 后
+    # residual 上限 0.15（约 2.4 个量化步长）。
+    action_clip_value: 3.0
+
+  commands:
+    motion:
+      reward_point_body: ["torso_link", "left_wrist_yaw_link", "right_wrist_yaw_link"]
+      reward_point_body_offset: [[0.0, 0.0, 0.5], [0.0, -0.0, 0.0], [0.0, -0.0, 0.0]]
+      num_future_frames: 10
+      dt_future_ref_frames: 0.1
+      # 只用 g1 编码器：桥接产物没有 smpl_pose 字段
+      encoder_sample_probs: { g1: 1.0, teleop: 0.0, smpl: 0.0 }
+      # 从柔顺目标初始化，理由见 notes/training-config.md
+      reset_from_compliant_target: true
+      motion_lib_cfg:
+        motion_file: /mnt/data/temp_user/yi.gao/outputs/cma/motionlib/stand_k45_train
+        smpl_motion_file: null
+
+algo:
+  config:
+    num_steps_per_env: 24          # 与发布配置及 SoftMimic 一致
+    max_grad_norm: 0.1             # 发布配置的值（比 ppo_im_phc 默认的 1.0 紧）
+    use_clampped_std: true
+    std_clamp_min: 0.001
+    std_clamp_max: 0.5
+    empty_cache_every_n_ppo_epoch: -1
+
+    # 学习率取 SONIC(2e-5) 与 SoftMimic(1e-3) 之间。前者的 actor 就是预训练基模
+    # 所以极小，后者是从零训的小 MLP。我们是新的零初始化 head 但输出喂进脆弱的
+    # 冻结隐空间，故折中。诊断量是 ‖Δz‖：1~2k 迭代后仍趋近 0 就调高。
+    actor_learning_rate: 1.e-4
+    adaptive_lr_min: 1.e-5
+    adaptive_lr_max: 5.e-4
+
+    # 与 latent_residual_scale=0.05 相乘得初始 residual 标准差 0.05。
+    # 若用 SONIC 默认的 0.05，乘积是 0.0025 —— 只有一个量化步长的 4%，等于没有探索。
+    init_noise_std: 1.0
+
+    actor:
+      backbone:
+        # 零初始化输出层：第 0 步行为与原 SONIC 逐位相同，从 success_rate 1.0 起步
+        zero_init_output: true
+        module_config_dict:
+          layer_config:
+            hidden_dims: [512, 512, 256, 128]   # SoftMimic 的 actor 结构
+            activation: ELU
+    critic:
+      backbone:
+        module_config_dict:
+          layer_config:
+            hidden_dims: [512, 512, 512, 512]   # SoftMimic 的 critic 结构
+            activation: ELU

@@ -152,9 +152,12 @@ class BaseModule(nn.Module):
         output_dim=None,
         num_input_temporal_dims=None,
         num_output_temporal_dims=None,
+        zero_init_output=False,
     ):
         super().__init__()
 
+        # SoftSONIC：把输出层权重/偏置零初始化，见 _build_mlp_layer 末尾的说明
+        self.zero_init_output = zero_init_output
         self.env_config = env_config
         self.algo_config = algo_config
         if obs_dim_dict is None:
@@ -301,6 +304,18 @@ class BaseModule(nn.Module):
                 layers.append(activation)
 
         self.module = nn.Sequential(*layers)
+
+        # ── SoftSONIC：输出层零初始化 ─────────────────────────────────────────
+        # 用于"冻结基模 + residual head"：head 输出恒为 0 时注入的 latent residual
+        # 为 0，整个系统的行为与原 SONIC **逐位相同**。于是训练从 success_rate 1.0
+        # 起步，而不是从一个被新奖励带崩的策略起步；ablation 也免费（residual 置零
+        # 即退回基模）。
+        # 只零化最后一层：前面各层保持正常初始化，梯度一旦流过就能立刻学起来。
+        if self.zero_init_output:
+            last_linear = [m for m in self.module if isinstance(m, nn.Linear)][-1]
+            nn.init.zeros_(last_linear.weight)
+            if last_linear.bias is not None:
+                nn.init.zeros_(last_linear.bias)
 
     def _build_cnn_layer(self, layer_config):
         """Build a CNN encoder from env camera config and layer specifications.

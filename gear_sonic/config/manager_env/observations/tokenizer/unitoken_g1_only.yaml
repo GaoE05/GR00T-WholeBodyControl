@@ -1,0 +1,46 @@
+# Universal token 观测：只保留 G1 与 teleop 编码器的输入，去掉 SMPL。
+#
+# ⚠️ **不要用于"加载冻结的预训练 ATM"的场景。** ATM 在构建时读
+# `env_config.obs.group_obs_dims["tokenizer"]` 与 `group_obs_names["tokenizer"]`
+# （universal_token_modules.py:187-188），其编码器输入维度被 checkpoint 权重锁死。
+# 删掉 SMPL 会让 tokenizer 的 obs schema 与 checkpoint 不一致。
+# 该场景下正确做法是**补零**：SMPL 编码器采样概率为 0 永不被用，数值无所谓，
+# 但形状必须保留。
+#
+# 本组只适用于从零训练、且确定不需要 SMPL 通路的实验。
+#
+# 为什么需要这个组：我们的动作数据由 CMA 增强 + 桥接而来，**没有 SMPL 字段**
+# （桥接产物的 smpl_joints 是零占位，也没有 smpl_pose）。即使把
+# encoder_sample_probs.smpl 设为 0，**观测项仍会被计算**，
+# 于是访问 motion_lib._motion_smpl_joints 时报 AttributeError。
+#
+# teleop 的输入保留：它们只依赖 vr_3point / 关节量，不需要 SMPL 数据，
+# 留着可以让将来做遥操作相关实验时不用再改这里。
+
+defaults:
+  - ../terms/encoder_index@_here_
+  - ../terms/command_multi_future_nonflat@_here_
+  - ../terms/command_z_multi_future_nonflat@_here_
+  - ../terms/motion_anchor_ori_b_mf_nonflat@_here_
+  # teleop
+  - ../terms/command_multi_future_lower_body@_here_
+  - ../terms/vr_3point_local_target@_here_
+  - ../terms/vr_3point_local_orn_target@_here_
+  - ../terms/motion_anchor_ori_b@_here_
+  - ../terms/command_z@_here_
+
+_target_: gear_sonic.envs.manager_env.mdp.observations.TokenizerCfg
+enable_corruption: true
+concatenate_terms: false
+
+motion_anchor_ori_b_mf_nonflat:
+  noise:
+    _target_: isaaclab.utils.noise.AdditiveUniformNoiseCfg
+    n_min: -0.05
+    n_max: 0.05
+
+motion_anchor_ori_b:
+  noise:
+    _target_: isaaclab.utils.noise.AdditiveUniformNoiseCfg
+    n_min: -0.05
+    n_max: 0.05
