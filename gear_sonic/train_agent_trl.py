@@ -378,6 +378,34 @@ def main(config: OmegaConf):
         else:
             env.config["robot"]["actions_dim"] = env.env.action_space.shape[-1]
 
+        # ── SoftSONIC：导出 ATM 配置后退出 ───────────────────────────────────
+        # 为什么需要这个钩子：env 侧的 ATM（action_transform_module_cfg）是在
+        # ManagerEnvWrapper.__init__ 里构建的，发生在**上面这段填充 obs 维度之前**，
+        # 所以它只能从一个已经烘焙好 obs.group_obs_dims / group_obs_names 的静态
+        # yaml 读取。而这些维度是运行期才知道的 —— 这大概也是 NVIDIA 的导出脚本
+        # 依赖运行期状态、没有随仓库发布的原因。
+        #
+        # 用法（两阶段）：先用 action_transform_module_cfg=null 跑一次导出，
+        # 再用导出的 yaml 正式训练。
+        #   python gear_sonic/train_agent_trl.py +exp=... \
+        #       ++manager_env.config.action_transform_module_cfg=null \
+        #       ++softsonic_dump_env_config=sonic_release/atm_export.yaml
+        dump_path = config.get("softsonic_dump_env_config", None)
+        if dump_path:
+            from omegaconf import OmegaConf as _OC
+
+            # 只 dump env_config。algo_config 必须取自**发布配置**（ATM 结构），
+            # 而本次运行的 config.algo.config 是 residual head 的 MLP 结构 ——
+            # 混淆会导致 load_state_dict 报 "Missing key actor_module.module.*
+            # / Unexpected key actor_module.encoders.*"。
+            # 两者的合并由 scripts/export_atm_config.py 完成。
+            payload = _OC.create({"env_config": env.config})
+            Path(dump_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(dump_path).write_text(_OC.to_yaml(payload, resolve=True))
+            logger.info(f"SoftSONIC: 已导出 ATM 配置 -> {dump_path}，退出")
+            return
+        # ── /SoftSONIC ──────────────────────────────────────────────────────
+
         policy = custom_instantiate(
             config.algo.config.actor,
             env_config=env.config,

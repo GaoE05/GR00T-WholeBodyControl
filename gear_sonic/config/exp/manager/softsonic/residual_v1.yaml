@@ -83,13 +83,18 @@ manager_env:
       reward_point_body_offset: [[0.0, 0.0, 0.5], [0.0, -0.0, 0.0], [0.0, -0.0, 0.0]]
       num_future_frames: 10
       dt_future_ref_frames: 0.1
-      # 只用 g1 编码器：桥接产物没有 smpl_pose 字段
+      # 只用 g1 编码器采样。但 SMPL 的**观测项**仍会被计算，而 CMA 增强数据没有
+      # SMPL 源（IK 在 G1 关节空间求解，SoftMimic 的 CSV 本身已是重定向后的结果）。
+      # 不能删 SMPL 观测组绕过：冻结 ATM 的编码器输入维度被 checkpoint 锁死，
+      # tokenizer 的 obs schema 必须与训练时一致。
+      # 上游为此留了正规入口 —— smpl_motion_file 设为 "zeros"
+      # （motion_lib_base.py:325）会生成占位数据，形状保留而数值为空。
       encoder_sample_probs: { g1: 1.0, teleop: 0.0, smpl: 0.0 }
       # 从柔顺目标初始化，理由见 notes/training-config.md
       reset_from_compliant_target: true
       motion_lib_cfg:
         motion_file: /mnt/data/temp_user/yi.gao/outputs/cma/motionlib/stand_k45_train
-        smpl_motion_file: null
+        smpl_motion_file: "zeros"
 
 algo:
   config:

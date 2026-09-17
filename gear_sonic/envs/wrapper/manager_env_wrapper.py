@@ -633,8 +633,14 @@ class ManagerEnvWrapper:
     def step(self, actions):
         if self.action_transform_module is not None:
             # Use provided obs_dict or fall back to stored obs from last reset/step
-            if "obs_dict" in actions:
-                obs_dict = actions["obs_dict"].copy()
+            # 只取一次值再判空。原写法是 `if "obs_dict" in actions:` 然后
+            # `actions["obs_dict"].copy()` —— 普通 PPO 训练器会传 obs_dict=None
+            # （键存在但值为空），于是对 None 调 .copy() 报错。
+            # 也不要写成 `if actions.get(...) is not None: actions[...].copy()`：
+            # actions 未必是普通 dict，get 与 [] 的语义可能不一致，两次查找不可靠。
+            provided_obs = actions.get("obs_dict", None) if hasattr(actions, "get") else None
+            if provided_obs is not None:
+                obs_dict = provided_obs.copy()
             else:
                 # Fallback for callbacks that don't provide obs_dict (e.g., im_eval)
                 obs_dict = getattr(self, "_last_obs_dict", None)
