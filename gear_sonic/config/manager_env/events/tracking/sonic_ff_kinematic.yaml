@@ -1,0 +1,25 @@
+# sonic_ff + 运动学驱动，**仅用于出对比视频 / 校验数据转换**，不用于训练。
+# use_aug=false：主 motion 在 clean 方案里已经是 q_aug，直接驱动主 motion 即可。
+defaults:
+  - terms/physics_material@_here_
+  - terms/add_joint_default_pos@_here_
+  - terms/base_com@_here_
+  - terms/randomize_rigid_body_mass@_here_
+  - terms/softsonic_force_field@_here_
+  - terms/softsonic_kinematic_drive@_here_
+
+_target_: gear_sonic.envs.manager_env.mdp.events.EventCfg
+
+randomize_rigid_body_mass:
+  mode: "startup"
+  params:
+    asset_cfg:
+      _target_: isaaclab.managers.SceneEntityCfg
+      name: "robot"
+      body_names: ".*wrist_yaw.*|torso_link"
+    mass_distribution_params: [0.8, 1.5]
+    operation: "scale"
+
+softsonic_kinematic_drive:
+  params:
+    use_aug: false

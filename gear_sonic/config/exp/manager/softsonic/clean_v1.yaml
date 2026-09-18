@@ -1,0 +1,103 @@
+# @package _global_
+# =============================================================================
+# SoftSONIC clean_v1 —— 把问题还原成"SONIC 本来就会做的事：跟踪一条 motion"
+# =============================================================================
+#
+# 设计原则：**尽可能少改 SONIC**。SoftMimic 只用来生成柔顺 motion，它的奖励项、
+# 观测项、超参一概不引入。
+#
+# 做法：把 SONIC 的跟踪目标整体换成柔顺 motion q_aug（数据侧用
+# `cma_to_motionlib.py --which adapted` 产出），于是：
+#   * 奖励       直接用原生 tracking/base_5point_local_feet_acc（12 项，一字未改）
+#   * 终止       直接用原生 tracking/base（tracking_* 与 exceeded_* 本来就是对
+#                "主 motion"算的，主 motion 已是 q_aug）
+#   * 观测       policy / critic 全用原生
+#   * reset      原生逻辑就是 reset 到主 motion 的状态 —— 与跟踪目标**天然一致**，
+#                不再需要 reset_from_compliant_target 这类补丁
+#   * PPO 超参   全部退回 sonic_release 的值（见下方 algo 段的说明）
+#
+# 相对 SONIC 原生，全部改动只有三处：
+#   1. 事件组换成 tracking/sonic_ff = 原生事件 + softsonic_force_field（必需：
+#      要在仿真里真的施加外力，否则 q_aug 只是一段没有成因的动作）
+#   2. manager_env.config 里打开 latent residual（本项目的核心）
+#   3. 动作数据换成柔顺版
+#
+# 明确不做的（与 residual_v2 的区别）：
+#   * 不用 tracking/softsonic* 奖励组（力跟踪、受力连杆、关节空间等全部不引入）
+#   * 不用 privileged_mf_hist_softsonic（critic 的外力/刚度/q_aug 特权观测不引入）
+#   * 不用 terminations/tracking/softsonic（exceeded_compliant_* 一律不用）
+#   * 不改 PPO 超参
+#   * 暂不要求策略区分受力/不受力 —— 只训受力，目标就是把 q_aug 跟出来
+# =============================================================================
+
+defaults:
+  - /algo: ppo_im_phc
+  - /manager_env: base_env
+  - /callbacks/read_eval
+  - /callbacks/im_resample
+  - override /trainer: trl
+  - override /actor_critic: mlp
+  - override /manager_env/observations/tokenizer: unitoken_all_noz
+  - override /manager_env/observations/policy: local_dir_hist
+  - override /manager_env/observations/critic: privileged_mf_hist
+  - override /manager_env/events: tracking/sonic_ff
+  - override /manager_env/terminations: tracking/base
+  - override /manager_env/rewards: tracking/base_5point_local_feet_acc
+
+use_manager_env: true
+exp_base: ${hydra:runtime.choices.exp}
+exp_var: c1
+experiment_name: ${exp_base}_${exp_var}
+experiment_dir: ${base_dir}/${project_name}/${experiment_name}-${timestamp}
+num_envs: 4096
+project_name: SoftSONIC_PRO5000
+
+actor_prop_history_length: 10
+actor_actions_history_length: 10
+critic_prop_history_length: 10
+critic_actions_history_length: 10
+
+manager_env:
+  config:
+    robot:
+      type: g1_model_12_dex
+    terrain_type: trimesh
+    action_transform_module_cfg: sonic_release/atm_export.yaml
+    action_transform_module_checkpoint: sonic_release/last.pt
+    meta_action_dim: 64
+    tokenizer_action_dim: 64
+    # ── 本项目的核心：在冻结 ATM 的 FSQ latent 上加残差 ──
+    use_latent_residual: true
+    latent_residual_mode: post_quantization
+    latent_residual_scale: 0.15
+    latent_residual_clip: 0.5
+    action_clip_value: 3.0
+  commands:
+    motion:
+      reward_point_body: ["torso_link", "left_wrist_yaw_link", "right_wrist_yaw_link"]
+      reward_point_body_offset: [[0.0, 0.0, 0.5], [0.0, -0.0, 0.0], [0.0, -0.0, 0.0]]
+      num_future_frames: 10
+      dt_future_ref_frames: 0.1
+      encoder_sample_probs: { g1: 1.0, teleop: 0.0, smpl: 0.0 }
+      # 不设 reset_from_compliant_target：主 motion 已是 q_aug，原生 reset 逻辑
+      # 直接 reset 到主 motion 的状态，与跟踪目标天然一致。
+      motion_lib_cfg:
+        motion_file: /mnt/data/temp_user/yi.gao/outputs/cma/motionlib/clean_aug_k45
+        smpl_motion_file: "zeros"
+
+algo:
+  config:
+    # PPO 超参**全部沿用 ppo_im_phc / sonic_release 的原生值**，不再引入
+    # SoftMimic Table II 的那一套（residual_v2 曾把 actor_lr 提到 1e-3、
+    # init_noise_std 提到 0.4、max_grad_norm 提到 1.0、critic 换成 [512]x4 ELU）。
+    #
+    # 唯一保留的改动是 actor 的 zero_init_output —— 残差头必须从 Δz=0 起步，
+    # 否则一开始就会破坏冻结底座的输出，这不是调参而是结构要求。
+    #
+    # 已知风险与判据：sonic_release 的 actor_learning_rate 是 2e-5，那是它自己
+    # 训练后期的值；我们的残差头是全新零初始化的网络，可能学得过慢。
+    # 判据写在 manager_env_wrapper.py 的注释里：**1~2k 迭代后 ‖Δz‖ 仍全程趋近 0
+    # 就说明学习率太低**。先按原生值跑，观察到该现象再动，不预先调。
+    actor:
+      backbone:
+        zero_init_output: true

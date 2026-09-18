@@ -1,0 +1,30 @@
+# SONIC 发布配置的事件 + 唯一必需的新增项：力场。
+#
+# 与 sonic_release/config.yaml 的事件表逐项对齐（physics_material、
+# add_joint_default_pos、base_com、push_robot、randomize_rigid_body_mass），
+# 参数全部保持原生值 —— 包括 randomize_rigid_body_mass 的 [0.8, 1.5]
+# （我们此前在 events/tracking/softsonic.yaml 里放宽到过 2.5，这里退回）。
+#
+# push_robot 保留（原生每 4~6 s 一次基座速度脉冲 ±0.5 m/s）。它扰动的是**基座**，
+# 力场作用在**手腕**，是两个通道。注意它带来的位移不体现在 q_aug 里，所以那些帧
+# 机器人应当"抵抗并恢复"，这正是 SONIC 原本的鲁棒性训练意图。若后续怀疑它干扰
+# 柔顺学习，这是第一个该做的消融。
+defaults:
+  - terms/physics_material@_here_
+  - terms/add_joint_default_pos@_here_
+  - terms/base_com@_here_
+  - terms/push_robot@_here_
+  - terms/randomize_rigid_body_mass@_here_
+  - terms/softsonic_force_field@_here_
+
+_target_: gear_sonic.envs.manager_env.mdp.events.EventCfg
+
+randomize_rigid_body_mass:
+  mode: "startup"
+  params:
+    asset_cfg:
+      _target_: isaaclab.managers.SceneEntityCfg
+      name: "robot"
+      body_names: ".*wrist_yaw.*|torso_link"
+    mass_distribution_params: [0.8, 1.5]
+    operation: "scale"
