@@ -43,7 +43,7 @@ defaults:
   - override /manager_env/observations/policy: local_dir_hist
   - override /manager_env/observations/critic: privileged_mf_hist
   - override /manager_env/events: tracking/sonic_ff
-  - override /manager_env/terminations: tracking/softsonic
+  - override /manager_env/terminations: tracking/compliant_relaxed
   - override /manager_env/rewards: tracking/compliant_native
 
 use_manager_env: true
