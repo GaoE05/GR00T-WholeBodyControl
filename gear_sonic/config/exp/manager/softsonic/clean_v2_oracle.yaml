@@ -92,6 +92,18 @@ algo:
     # ppo_im_phc 的默认 max_grad_norm 是 1.0，但 sonic_release 实际用的是 0.1。
     # 我们要复现的是**发布 checkpoint 那次训练的配方**，故显式对齐到 0.1。
     max_grad_norm: 0.1
+    # 同样是补回 sonic_release 里有、而 ppo_im_phc 默认没有的设置。
+    # 漏掉它的后果实测很严重：探索噪声 std 从 0.05 一路涨到 **1.10** 无人约束，
+    # ‖Δz‖ 同步涨到 1.587，而 augJ 从 0.0456 退化到 0.0863 —— PPO 在纯粹地
+    # 最大化熵，因为任务信号（刚性->柔顺仅占总奖励 2.48%）给不出梯度。
+    #
+    # 注意熵项还有一个量纲问题：entropy_coef=0.01 是 SONIC 为 **29 维关节动作**
+    # 调的，而我们的动作是 **64 维 latent 残差**。高斯熵 H=d/2*log(2*pi*e*sigma^2)
+    # 与维数成正比，同系数下熵项绝对量值是 SONIC 的 2.21 倍。本次先只补回原生的
+    # 钳制（不动 entropy_coef），把"补回原生"和"按量纲改系数"分开验证。
+    use_clampped_std: true
+    std_clamp_min: 0.001
+    std_clamp_max: 0.5
     actor:
       backbone:
         zero_init_output: true
