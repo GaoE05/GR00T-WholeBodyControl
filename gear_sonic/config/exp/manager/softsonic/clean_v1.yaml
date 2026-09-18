@@ -41,7 +41,7 @@ defaults:
   - override /manager_env/observations/policy: local_dir_hist
   - override /manager_env/observations/critic: privileged_mf_hist
   - override /manager_env/events: tracking/sonic_ff
-  - override /manager_env/terminations: tracking/base
+  - override /manager_env/terminations: tracking/base_adaptive_strict_ori_foot_xyz
   - override /manager_env/rewards: tracking/base_5point_local_feet_acc
 
 use_manager_env: true
@@ -98,6 +98,9 @@ algo:
     # 训练后期的值；我们的残差头是全新零初始化的网络，可能学得过慢。
     # 判据写在 manager_env_wrapper.py 的注释里：**1~2k 迭代后 ‖Δz‖ 仍全程趋近 0
     # 就说明学习率太低**。先按原生值跑，观察到该现象再动，不预先调。
+    # ppo_im_phc 的默认 max_grad_norm 是 1.0，但 sonic_release 实际用的是 0.1。
+    # 我们要复现的是**发布 checkpoint 那次训练的配方**，故显式对齐到 0.1。
+    max_grad_norm: 0.1
     actor:
       backbone:
         zero_init_output: true
