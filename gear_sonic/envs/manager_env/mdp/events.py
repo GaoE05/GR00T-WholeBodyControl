@@ -467,6 +467,12 @@ def apply_softsonic_force_field(
     env._softsonic_active = active.clone()  # noqa: SLF001
     env._softsonic_k_ff = k_ff.clone()  # noqa: SLF001  critic 特权观测用
 
+    # 力场设定点（世界系），供对比视频画"力往哪拉"。无力的环境填零。
+    sp_buf = torch.zeros(env.num_envs, 3, device=env.device)
+    if active.any():
+        sp_buf[rows] = setpoint_pos
+    env._softsonic_force_setpoint = sp_buf  # noqa: SLF001
+
     # 受力连杆在**本资产**里的 body 索引（无力的环境填 -1）。
     # 供 compliant_force_link_* 奖励使用 —— 对照 SoftMimic 的
     # force_link_keypoint_tracking_local，它同样只惩罚受力连杆那一个点的误差。

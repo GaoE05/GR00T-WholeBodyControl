@@ -248,6 +248,13 @@ class TrajectoryRecorderTerm(recorder_manager.RecorderTerm):
             "force_actual_w": [],
             "force_desired_w": [],
             "force_pos_w": [],
+            "residual": [],   # SoftSONIC：latent residual Δz，用于判断策略是否开环
+            # SoftSONIC：当前动作帧号。多路录制各自的 episode 终止时机不同，
+            # 同一视频帧对应的动作帧会错开 —— 对比视频必须按它对齐，
+            # 否则三路在"同一时刻"看到的其实是不同的受力事件。
+            "motion_step": [],
+            # 力场设定点（世界系，相对 env 原点），用于画"力往哪拉"
+            "force_setpoint_w": [],
             "root_pos_w": [],
             "root_quat_w": [],
         }
@@ -312,6 +319,19 @@ class TrajectoryRecorderTerm(recorder_manager.RecorderTerm):
                 else:
                     fp = z3
                 self._frame_data[i]["force_pos_w"].append(fp)
+            cmd = self._motion_cmd
+            if cmd is not None:
+                self._frame_data[i]["motion_step"].append(
+                    int((cmd.motion_start_time_steps[i] + cmd.time_steps[i]).item()))
+            else:
+                self._frame_data[i]["motion_step"].append(-1)
+            sp = getattr(self.env, "_softsonic_force_setpoint", None)
+            self._frame_data[i]["force_setpoint_w"].append(
+                (sp[i].cpu().numpy().copy() - env_origins[i].cpu().numpy())
+                if sp is not None else np.zeros(3, dtype=np.float32))
+            rz = getattr(self.env, "_softsonic_residual", None)
+            self._frame_data[i]["residual"].append(
+                rz[i].cpu().numpy().copy() if rz is not None else np.zeros(1, dtype=np.float32))
 
             # Object state
             if self._has_object:
@@ -362,6 +382,12 @@ class TrajectoryRecorderTerm(recorder_manager.RecorderTerm):
                 "num_joints": data["dof_pos"][0].shape[0],
                 "total_frames": len(data["dof_pos"]),
             }
+            if data.get("motion_step"):
+                trajectory["motion_step"] = np.array(data["motion_step"])
+            if data.get("force_setpoint_w"):
+                trajectory["force_setpoint_w"] = np.array(data["force_setpoint_w"])
+            if data.get("residual"):
+                trajectory["residual"] = np.array(data["residual"])
             if data.get("force_actual_w"):
                 trajectory["force_actual_w"] = np.array(data["force_actual_w"])
                 trajectory["force_desired_w"] = np.array(data["force_desired_w"])

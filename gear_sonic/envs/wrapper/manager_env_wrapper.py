@@ -787,6 +787,7 @@ class ManagerEnvWrapper:
                 #   接近 latent_residual_clip×√64 说明顶到上限，该放宽上限或调低 lr。
                 # 与 FSQ 的量化步长 0.0645、token 值域 [-1, 0.9375] 对照着看。
                 self.env._softsonic_residual_norm = scaled_residual.norm(dim=-1)  # noqa: SLF001
+                self.env._softsonic_residual = scaled_residual.detach()  # noqa: SLF001
                 # Add residual in latent/token space (after encoding, before decoding)
                 body_actions = self.action_transform_module(
                     atm_obs_dict,
