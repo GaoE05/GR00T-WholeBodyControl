@@ -1,0 +1,11 @@
+# SoftSONIC：关节空间的 q_aug 跟踪。
+# 权重与 σ 取自 SoftMimic 的 joint_deviation_upper_body_commanded
+# （tracking_env_cfg.py:450-456，weight=2.0；mdp/rewards.py:70-84，核是
+# exp(-‖Δq‖/σ²)，σ 默认 1.0，asset_cfg 无 joint_names 过滤即全部关节）。
+tracking_compliant_joint_pos:
+  _target_: isaaclab.managers.RewardTermCfg
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_joint_pos_error
+  weight: 2.0
+  params:
+    command_name: "motion"
+    std: 1.0

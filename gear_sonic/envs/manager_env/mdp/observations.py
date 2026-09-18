@@ -284,6 +284,9 @@ class PrivilegedCfg(ObsGroup):
     softsonic_torque_applied = None
     softsonic_force_desired = None
     softsonic_ff_stiffness_log = None
+    # SoftSONIC：让 critic 看得见 q_aug（对照 SoftMimic 的 adapted_* 整套）
+    softsonic_joint_pos_aug_error = None
+    softsonic_body_pos_aug_error_b = None
 
     command = None
     command_max = None
@@ -533,6 +536,57 @@ def softsonic_ff_stiffness_log(env: ManagerBasedEnv) -> torch.Tensor:
     """
     k = _softsonic_buffer(env, "_softsonic_k_ff", 1)
     return torch.log1p(k.clamp(min=0.0))
+
+
+def softsonic_joint_pos_aug_error(
+    env: ManagerBasedEnv, command_name: str = "motion"
+) -> torch.Tensor:
+    """(q_aug - q_robot) 逐关节，形状 (num_envs, num_joints)。**仅供 critic**。
+
+    对照 SoftMimic ``g1_force_control.py:328`` 起的 ``critic.adapted_reference_dof_pos``
+    —— 它把 critic 的 q_ref 系观测整套复制一份、把 func 换成 adapted 版本，让
+    critic 同时看到 q_ref 和 q_aug。
+
+    为什么必须给 critic：critic 现在只看得到 q_ref 系的量（body_pos/ori、
+    command_multi_future）加 4 项外力。受力时机器人**应该**偏离 q_ref，于是
+    "正在正确地退让"和"单纯跟丢了"在 critic 眼里是同一个大误差 —— 价值函数无法
+    区分，优势估计带噪，正是残差学不出力相关结构的一个直接原因。
+
+    给误差而非 q_aug 绝对值：critic 本就有 joint_pos 观测，二者等价，但误差
+    量纲已中心化在 0 附近，对输入归一化更友好。
+    """
+    command: commands.TrackingCommand = env.command_manager.get_term(command_name)
+    if not command.motion_lib.has_aug_pose:
+        return torch.zeros_like(command.robot_joint_pos)
+    steps = command.motion_start_time_steps + command.time_steps
+    dof_aug = command.motion_lib.get_dof_pos_aug(command.motion_ids, steps)
+    robot_dof = (
+        command.robot_joint_pos[:, command.body_joint_indices]
+        if command.has_dof_mismatch
+        else command.robot_joint_pos
+    )
+    return dof_aug - robot_dof
+
+
+def softsonic_body_pos_aug_error_b(
+    env: ManagerBasedEnv, command_name: str = "motion"
+) -> torch.Tensor:
+    """(p_aug - p_robot) 各跟踪连杆，机器人锚定系，形状 (num_envs, num_bodies*3)。
+
+    对照 SoftMimic ``g1_force_control.py:317-326`` 的
+    ``critic.all_adapted_keypoints_pos_error_local``。坐标系约定与本文件的
+    ``robot_body_pos_b`` 一致（``subtract_frame_transforms`` 到 robot anchor），
+    保证与 critic 已有的 body_pos 观测同系可比。
+    """
+    command: commands.TrackingCommand = env.command_manager.get_term(command_name)
+    num_bodies = len(command.cfg.body_names)
+    if not command.motion_lib.has_aug_pose:
+        return torch.zeros(env.num_envs, num_bodies * 3, device=env.device)
+    diff_w = command.body_pos_w_aug - command.robot_body_pos_w
+    diff_b = quat_apply_inverse(
+        command.robot_anchor_quat_w[:, None, :].expand(-1, num_bodies, -1), diff_w
+    )
+    return diff_b.reshape(env.num_envs, -1)
 
 
 def command_max(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:

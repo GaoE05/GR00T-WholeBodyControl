@@ -1,0 +1,9 @@
+# SoftSONIC：(q_aug - q_robot) 逐关节。仅供 critic。
+# 对照 SoftMimic g1_force_control.py:328 起的 critic.adapted_reference_dof_pos ——
+# 上游把 critic 的整套 q_ref 观测复制一份、func 换成 adapted 版，让 critic 同时
+# 看到 q_ref 和 q_aug。没有它，critic 分不清"正在正确退让"和"单纯跟丢了"。
+softsonic_joint_pos_aug_error:
+  _target_: isaaclab.managers.ObservationTermCfg
+  func: gear_sonic.envs.manager_env.mdp:softsonic_joint_pos_aug_error
+  params:
+    command_name: "motion"

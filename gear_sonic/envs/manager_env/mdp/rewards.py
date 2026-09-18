@@ -68,6 +68,9 @@ class RewardsCfg:
     alive = None
     # SoftSONIC：latent residual 的幅值惩罚（见函数 docstring 的依据）
     latent_residual_l2 = None
+    # SoftSONIC：关节空间的 q_aug 跟踪（对照 SoftMimic 的
+    # joint_deviation_upper_body_commanded，权重 2.0）
+    tracking_compliant_joint_pos = None
 
 
 def tracking_anchor_pos_error(
@@ -955,3 +958,43 @@ def latent_residual_l2(env: ManagerBasedRLEnv) -> torch.Tensor:
     if residual is None:
         return torch.zeros(env.num_envs, device=env.device)
     return torch.sum(torch.square(residual), dim=-1)
+
+
+def tracking_compliant_joint_pos_error(
+    env: ManagerBasedRLEnv,
+    command_name: str = "motion",
+    std: float = 1.0,
+) -> torch.Tensor:
+    """关节空间的 q_aug 跟踪奖励。SoftMimic 的 joint_deviation_from_command_exp 的移植。
+
+    上游依据（逐行核对）：
+      * ``tracking_env_cfg.py:450-456`` —— ``joint_deviation_upper_body_commanded``
+        权重 **2.0**，``asset_cfg`` 用默认的 ``SceneEntityCfg("robot")``（无
+        joint_names 过滤），即**全部关节**；
+      * ``mdp/rewards.py:70-84`` —— 核是 ``exp(-‖Δq‖ / σ²)``，注意分子是
+        **一次范数不是平方**，σ 默认 1.0；
+      * 目标取 ``command_term.dof_pos``，而
+        ``compliance_augmented_reference_command.py:497-499`` 里该属性在
+        ``override_reference=True``（力控实验的设置）下返回的是
+        ``_adapted_dof_pos``，**即 q_aug 而非 q_ref**。
+
+    为什么我们需要它：我们原有 15 个奖励项**全部在笛卡尔系/锚定系**（连杆位置、
+    朝向、速度、5point）。G1 有 29 个自由度去实现 14 个连杆的位姿，是高度冗余的
+    构型空间 —— 笛卡尔项对"同一手腕位置由哪套全身构型实现"几乎不约束，于是
+    "全身协同退让"和"局部别扭地凑出手腕位置"得分相同。关节空间项直接约束构型。
+
+    实现上复用 ``commands.py:2542-2550`` 里 ``error_joint_pos_aug`` 指标已经走通
+    的那条取数路径（``motion_lib.get_dof_pos_aug`` + ``body_joint_indices`` 对齐），
+    避免再抄一份索引逻辑。无 aug 数据时返回全 1（该项不产生梯度）。
+    """
+    command = env.command_manager.get_term(command_name)
+    if not command.motion_lib.has_aug_pose:
+        return torch.ones(env.num_envs, device=env.device)
+    steps = command.motion_start_time_steps + command.time_steps
+    dof_aug = command.motion_lib.get_dof_pos_aug(command.motion_ids, steps)
+    robot_dof = (
+        command.robot_joint_pos[:, command.body_joint_indices]
+        if command.has_dof_mismatch
+        else command.robot_joint_pos
+    )
+    return torch.exp(-torch.norm(dof_aug - robot_dof, dim=-1) / std**2)

@@ -18,6 +18,9 @@ defaults:
   - ../terms/softsonic_torque_applied@_here_
   - ../terms/softsonic_force_desired@_here_
   - ../terms/softsonic_ff_stiffness_log@_here_
+  # v18：让 critic 看得见 q_aug（对照 SoftMimic 的 critic.adapted_* 整套）
+  - ../terms/softsonic_joint_pos_aug_error@_here_
+  - ../terms/softsonic_body_pos_aug_error_b@_here_
 
 softsonic_force_applied:
   history_length: ${critic_prop_history_length}
@@ -27,3 +30,13 @@ softsonic_force_desired:
   history_length: ${critic_prop_history_length}
 softsonic_ff_stiffness_log:
   history_length: ${critic_prop_history_length}
+# 历史长度取 3，是 SoftMimic 明写的值（g1_force_control.py:320 的
+# all_adapted_keypoints_pos_error_local history_length=3），**不是**我们自己的
+# critic_prop_history_length=10。这里刻意不跟本仓库其它 critic 项保持一致 ——
+# 用 10 会把 critic 输入从 1745 顶到 2455（+41%），而 3 只 +213。
+# 教训来源：σ_force 那次就是抄了上游的 20 却没抄上游的力量级，这次反过来，
+# 别抄我们自己的数。
+softsonic_joint_pos_aug_error:
+  history_length: 3
+softsonic_body_pos_aug_error_b:
+  history_length: 3

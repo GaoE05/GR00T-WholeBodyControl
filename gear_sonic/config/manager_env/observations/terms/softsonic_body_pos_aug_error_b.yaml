@@ -1,0 +1,7 @@
+# SoftSONIC：(p_aug - p_robot) 各跟踪连杆，机器人锚定系。仅供 critic。
+# 对照 SoftMimic g1_force_control.py:317-326 的 all_adapted_keypoints_pos_error_local。
+softsonic_body_pos_aug_error_b:
+  _target_: isaaclab.managers.ObservationTermCfg
+  func: gear_sonic.envs.manager_env.mdp:softsonic_body_pos_aug_error_b
+  params:
+    command_name: "motion"
