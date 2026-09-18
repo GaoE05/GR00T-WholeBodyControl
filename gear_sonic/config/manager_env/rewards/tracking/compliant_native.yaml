@@ -1,0 +1,47 @@
+# SONIC 发布配方的 12 个奖励项，**一项不增一项不减**，只把 7 个跟踪项的目标
+# 从主 motion(q_ref) 改指向柔顺目标 q_aug —— 只换 func，项名、权重、σ 全不动。
+#
+# 与 tracking/softsonic.yaml 的区别：后者额外加了 applied_force_tracking /
+# applied_torque_tracking / alive 三项。本文件刻意不加，保持"只改必须改的"。
+#
+# 为什么速度项(linvel/angvel，合计 2.0)也必须改指 q_aug：柔顺退让本身就是运动
+# （0.2~1s 内手腕走 24cm），而 stand 的 q_ref 速度接近零。留在 q_ref 会精确惩罚
+# 位姿项所奖励的行为，是方向相反的 2.0 权重。q_aug 的速度由 fk_batch 在加载时
+# 一并解出，与位姿同源同插值。
+#
+# feet_acc：仓库项文件默认 -2.5e-7，但发布 checkpoint 实际用 -2.5e-06
+# （见 sonic_release/config.yaml），差 10 倍。我们冻结该 checkpoint 只训残差，
+# 配方应与它一致，故显式对齐。
+
+defaults:
+  - terms/tracking_anchor_pos@_here_
+  - terms/tracking_anchor_ori@_here_
+  - terms/tracking_relative_body_pos@_here_
+  - terms/tracking_relative_body_ori@_here_
+  - terms/tracking_body_linvel@_here_
+  - terms/tracking_body_angvel@_here_
+  - terms/action_rate_l2@_here_
+  - terms/joint_limit@_here_
+  - terms/undesired_contacts@_here_
+  - terms/anti_shake_ang_vel@_here_
+  - terms/tracking_vr_5point_local@_here_
+  - terms/feet_acc@_here_
+
+_target_: gear_sonic.envs.manager_env.mdp.rewards.RewardsCfg
+
+tracking_anchor_pos:
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_anchor_pos_error
+tracking_anchor_ori:
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_anchor_ori_error
+tracking_relative_body_pos:
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_relative_body_pos_error
+tracking_relative_body_ori:
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_relative_body_ori_error
+tracking_vr_5point_local:
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_local_vr_5point_error
+tracking_body_linvel:
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_body_linvel_error
+tracking_body_angvel:
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_body_angvel_error
+feet_acc:
+  weight: -2.5e-06
