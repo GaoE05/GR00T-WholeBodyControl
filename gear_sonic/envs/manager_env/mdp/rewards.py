@@ -66,6 +66,8 @@ class RewardsCfg:
     compliant_force_link_ori = None
     applied_torque_tracking = None
     alive = None
+    # SoftSONIC：latent residual 的幅值惩罚（见函数 docstring 的依据）
+    latent_residual_l2 = None
 
 
 def tracking_anchor_pos_error(
@@ -920,3 +922,36 @@ def alive(env: ManagerBasedRLEnv) -> torch.Tensor:
     提前终止来规避负项。
     """
     return torch.ones(env.num_envs, device=env.device)
+
+
+def latent_residual_l2(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """惩罚 latent residual 的**幅值**（注意不是变化率）。
+
+    为什么需要这一项 —— 不是启发式加项，是补一个结构性缺口：
+
+    SONIC 发布配方里的正则项是 ``action_rate_l2``（权重 -1e-1），它惩罚的是
+    **相邻两步 29 维关节目标的差**。在 SONIC 自己的设定下这是对的：动作就是
+    关节目标，其幅值有物理含义，不该往零拉，能罚的只有抖动。
+
+    但我们的 RL 动作是**加在冻结 latent 上的残差**，Δz=0 才是有意义的默认值。
+    对一个常量 Δz 偏置，``action_rate_l2`` 的代价恰好是 **0** —— 整个配方里
+    没有任何一项在为"无谓地扰动 SONIC 的 latent"付费。于是 PPO 收敛到了一个
+    大的常量偏置（一种全局"变软"的廉价策略），而不是按力反应。
+
+    v14 实测（scripts 侧离线分解，见 notes/）：
+      * 无外力帧 ‖Δz‖ 中位 1.550，有外力帧 1.626 —— 与 manager_env_wrapper.py
+        里写明的判据"无外力时 ‖Δz‖ 应趋近 0"直接相悖；
+      * 残差能量 43.1% 是整段常量偏置，56.9% 是时变分量，而时变分量里只有
+        R²=23.9% 能被外力向量线性解释 —— 真正与外力相关的能量仅约 14%；
+      * 逐维 |Δz| 中位 0.1508，合 2.3 个 FSQ 量化步长，88.4% 的维度超过半步。
+
+    因此幅值惩罚才是 ``action_rate_l2`` 在残差空间的正确对应物，权重也直接取
+    与之相同的 -1e-1，避免再引入一个凭感觉定的数。
+
+    读的是 ``env._softsonic_residual``，即 **已缩放且已裁剪**的 Δz（单位是 FSQ
+    token），所以该项对 ``latent_residual_scale`` 这个超参不敏感。
+    """
+    residual = getattr(env, "_softsonic_residual", None)
+    if residual is None:
+        return torch.zeros(env.num_envs, device=env.device)
+    return torch.sum(torch.square(residual), dim=-1)

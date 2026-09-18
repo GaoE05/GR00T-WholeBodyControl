@@ -1,0 +1,10 @@
+# latent residual 的幅值惩罚。
+#
+# 权重取 -1e-1，与 SONIC 发布配方里的 action_rate_l2 完全相同 —— 这两项是同一
+# 件事在两个动作空间里的对应物（见 rewards.latent_residual_l2 的 docstring）：
+# action_rate_l2 管 29 维关节目标的变化率，latent_residual_l2 管 64 维 latent
+# 残差的幅值。对常量偏置，前者代价为 0，只有后者能罚到。
+latent_residual_l2:
+  _target_: isaaclab.managers.RewardTermCfg
+  func: gear_sonic.envs.manager_env.mdp:latent_residual_l2
+  weight: -1e-1
