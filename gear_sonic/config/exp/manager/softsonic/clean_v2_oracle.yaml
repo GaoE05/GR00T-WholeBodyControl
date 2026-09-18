@@ -1,36 +1,17 @@
 # @package _global_
 # =============================================================================
-# SoftSONIC clean_v2 —— 可部署形式：ATM 只看得到刚性 motion，柔顺必须由残差产生
+# 诊断实验：force-oracle —— 把真实外力直接喂给 actor
 # =============================================================================
+# **不可部署，纯诊断。** 目的是一刀切开两个互斥假设：
+#   A 感知问题：策略从本体感知里看不见力，所以只能学与力无关的漂移
+#   B 结构问题：能看见力，但"冻结 ATM + latent 残差"这条路本身有上限
+# 判据：喂了力还学不出柔顺（f/i 仍≈1、augJ 不低于不动基线）=> B；学得出 => A。
 #
-# 与 clean_v1 的唯一结构差别：**主 motion 换回 q_ref**。
-#
-# 为什么必须这样：clean_v1 把 q_aug 直接喂给冻结的 ATM，ATM 本就是跟踪控制器，
-# 给它柔顺动作它就去跟 —— 残差无事可做（实测：训 1533 迭代后 errJ 0.0594，
-# 比 Δz≡0 的 0.0514 还差，‖Δz‖ 无界增长到 1.875 且 forced/idle=1.003）。
-# clean_v1 因此只是一个 **oracle 上界**，证明了数据管线正确、柔顺动作可达
-# （errJ 0.0516，恰在 SONIC 自身误差底 0.0485 上），但真机上没有 q_aug ——
-# 算它需要知道外力并跑 CMA 的离线 IK。
-#
-# clean_v2 的形式：ATM 看 q_ref，残差头只看本体感知，奖励/终止/reset 对 q_aug。
-# 于是"柔顺"这件事只能由残差从本体感知推断外力后产生 —— 这才是要解决的问题。
-#
-# ── 相对 SONIC 原生的改动，仍然只有四处 ──────────────────────────────────
-#   1. 奖励组 tracking/compliant_native：原生 12 项一项不增不减，只把 7 个跟踪项
-#      的 func 换成 compliant 版（目标 q_ref -> q_aug）
-#   2. 终止组 tracking/softsonic：5 项与发布配置逐项相同（含阈值），只换 func
-#   3. 事件组 tracking/sonic_ff：发布配置 5 个事件 + softsonic_force_field
-#   4. 打开 latent residual + 数据换柔顺增强版
-#   观测（policy 与 critic）**完全原生**，不加任何特权外力/刚度/q_aug 观测。
-#   PPO 超参完全原生。
-#
-# ── 数据：k_robot 45 -> 450 ──────────────────────────────────────────────
-# 实测诊断：外力把 SONIC 推离刚性目标只有 0.16°，而要求的柔顺退让是 4.2°，
-# 且 SONIC 自身跟踪误差底是 2.78° —— 策略要检测的信号只有底噪的 0.06 倍。
-# 力 = k_robot x 位移，把 k_robot 提到 450 而位移上限仍为 0.25 m：
-#   力  U[0,11] N -> U[0,112] N（进入 SoftMimic 的 140 N 量级）
-#   柔顺退让幅度**完全不变**（退让量 = F/k_robot，两者同倍数放大后相消）
-# 即：要检测的信号强 10 倍，要做的动作一模一样，信噪比 0.06 -> 0.6。
+# 与 clean_v2 的唯一差别是观测：
+#   policy      local_dir_hist -> local_dir_hist_forceoracle（多 3 维期望力 x3 步历史）
+#   policy_atm  新增，= policy/local_dir_hist 的逐字副本
+# policy_atm 必须同时加，否则 ATM 输入维度会从 930 变化导致 checkpoint 载入失败。
+# ATM 输入是否逐位不变，由 scripts/verify_policy_atm.py 验证。
 # =============================================================================
 defaults:
   - /algo: ppo_im_phc
@@ -40,7 +21,8 @@ defaults:
   - override /trainer: trl
   - override /actor_critic: mlp
   - override /manager_env/observations/tokenizer: unitoken_all_noz
-  - override /manager_env/observations/policy: local_dir_hist
+  - override /manager_env/observations/policy: local_dir_hist_forceoracle
+  - override /manager_env/observations/policy_atm: local_dir_hist
   - override /manager_env/observations/critic: privileged_mf_hist
   - override /manager_env/events: tracking/sonic_ff
   - override /manager_env/terminations: tracking/compliant_relaxed
@@ -48,7 +30,7 @@ defaults:
 
 use_manager_env: true
 exp_base: ${hydra:runtime.choices.exp}
-exp_var: c2
+exp_var: o1
 experiment_name: ${exp_base}_${exp_var}
 experiment_dir: ${base_dir}/${project_name}/${experiment_name}-${timestamp}
 num_envs: 4096

@@ -1,0 +1,25 @@
+# sonic_ff 去掉 push_robot 的版本。
+#
+# 为什么去掉：push_robot 每 4~6 s 给基座一次 ±0.5 m/s 的速度脉冲，而这个扰动
+# **不体现在柔顺目标 q_aug 里**。于是同一个 episode 内，策略被要求对腕部外力
+# "让开"、同时对基座推力"抵抗并恢复" —— 两者都是外部扰动，目标却相反。
+# 它是 SONIC 原生项（发布配置里有），保留它符合"最小改动"，但它与柔顺目标冲突，
+# 是这套配方里唯一一处"原生但与任务相悖"的地方，故单独做消融。
+defaults:
+  - terms/physics_material@_here_
+  - terms/add_joint_default_pos@_here_
+  - terms/base_com@_here_
+  - terms/randomize_rigid_body_mass@_here_
+  - terms/softsonic_force_field@_here_
+
+_target_: gear_sonic.envs.manager_env.mdp.events.EventCfg
+
+randomize_rigid_body_mass:
+  mode: "startup"
+  params:
+    asset_cfg:
+      _target_: isaaclab.managers.SceneEntityCfg
+      name: "robot"
+      body_names: ".*wrist_yaw.*|torso_link"
+    mass_distribution_params: [0.8, 1.5]
+    operation: "scale"

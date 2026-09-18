@@ -1,0 +1,9 @@
+# 诊断专用 policy 组：在 local_dir_hist 基础上，把**真实外力**喂给 actor。
+# 特权信息，不可部署。用途见 observations.softsonic_force_desired_policy 的 docstring。
+# 必须配合 policy_atm 组使用，否则会改变 ATM 的输入维度（930）导致载入失败。
+defaults:
+  - local_dir_hist@_here_
+  - ../terms/softsonic_force_desired_policy@_here_
+
+softsonic_force_desired_policy:
+  history_length: 3

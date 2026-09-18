@@ -156,6 +156,14 @@ class PolicyCfg(ObsGroup):
     # Terrain observations
     height_map_flat = None
 
+    # SoftSONIC 诊断用：把真实外力直接喂给 actor（**特权信息，不可部署**）。
+    # 声明在 PolicyCfg 最末尾，使新增维度追加在观测向量尾部。
+    # 目的是一刀切开两个互斥假设：
+    #   A 感知问题 —— 策略从本体感知看不见力，只能学与力无关的漂移；
+    #   B 结构问题 —— 能看见力，但"冻结 ATM + 残差"这条路本身有上限。
+    # 喂了力还学不出柔顺 => B；学得出 => A，后续投入应放在感知侧。
+    softsonic_force_desired_policy = None
+
 
 @configclass
 class PolicyAtmCfg(ObsGroup):
@@ -169,7 +177,20 @@ class PolicyAtmCfg(ObsGroup):
     """
 
     # Order matches PolicyCfg: base_ang_vel, joint_pos, joint_vel, actions, gravity_dir
+    #
+    # SoftSONIC：补上与 PolicyCfg **同名同序**的三项。
+    # 用途：把"喂给冻结 ATM 的观测"与"喂给残差头的观测"解耦 —— ATM 的输入维度被
+    # checkpoint 锁死在 930，而我们要往策略侧加观测。有了 policy_atm 组之后，
+    # manager_env_wrapper._prepare_obs_for_action_transform_module 会用它替换
+    # ATM 的 actor_obs，policy 组便可自由扩展。
+    #
+    # **顺序即布局**：IsaacLab 的 ObsGroup 按 configclass 字段声明顺序拼接，
+    # 所以这三项必须插在 base_ang_vel 之后、gravity_dir 之前，与 PolicyCfg 一致。
+    # 顺序错位 ATM 会**静默**吃错输入（不报错、行为全错），故必须逐位比对验证。
     base_ang_vel = None
+    joint_pos = None
+    joint_vel = None
+    actions = None
     joint_pos_wo_hand = None
     joint_vel_wo_hand = None
     actions_wo_hand = None
@@ -537,6 +558,18 @@ def softsonic_ff_stiffness_log(env: ManagerBasedEnv) -> torch.Tensor:
     """
     k = _softsonic_buffer(env, "_softsonic_k_ff", 1)
     return torch.log1p(k.clamp(min=0.0))
+
+
+def softsonic_force_desired_policy(env: ManagerBasedEnv) -> torch.Tensor:
+    """该帧的期望交互力（世界系，3 维）。**诊断专用，喂给 actor 是特权信息。**
+
+    与 critic 侧的 ``softsonic_force_desired`` 是同一个量，单独起名只是为了让
+    policy 观测组能独立引用、不与 critic 组的项名冲突。
+
+    **不可部署**：真机上拿不到这个量。它只用于回答"如果策略能看见力，它学得会
+    柔顺吗"这一个诊断问题。
+    """
+    return _softsonic_buffer(env, "_softsonic_force_desired", 3)
 
 
 def softsonic_robot_stiffness_log(env: ManagerBasedEnv) -> torch.Tensor:

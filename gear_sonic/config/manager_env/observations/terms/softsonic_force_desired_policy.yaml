@@ -1,0 +1,4 @@
+# SoftSONIC 诊断：期望交互力，喂给 actor（特权信息，不可部署）。
+softsonic_force_desired_policy:
+  _target_: isaaclab.managers.ObservationTermCfg
+  func: gear_sonic.envs.manager_env.mdp:softsonic_force_desired_policy
