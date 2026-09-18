@@ -255,6 +255,7 @@ class TrajectoryRecorderTerm(recorder_manager.RecorderTerm):
             "motion_step": [],
             # 力场设定点（世界系，相对 env 原点），用于画"力往哪拉"
             "force_setpoint_w": [],
+            "rigid_limit": [],
             "root_pos_w": [],
             "root_quat_w": [],
         }
@@ -329,6 +330,13 @@ class TrajectoryRecorderTerm(recorder_manager.RecorderTerm):
             self._frame_data[i]["force_setpoint_w"].append(
                 (sp[i].cpu().numpy().copy() - env_origins[i].cpu().numpy())
                 if sp is not None else np.zeros(3, dtype=np.float32))
+            # 该帧的"完全刚性"参考比值 1+k_ff/k_robot（events.py 逐帧算好）。
+            # 录下来是为了事后能精确算 compliance=(limit-ratio)/(limit-1)：
+            # k_ff 是逐事件对数均匀采样的，拿常数近似会算错；而从
+            # force_actual/force_setpoint 反推 k_ff 在 |dp| 很小的帧上不可靠。
+            rl = getattr(self.env, "_softsonic_rigid_limit", None)
+            self._frame_data[i]["rigid_limit"].append(
+                float(rl[i].item()) if rl is not None else 1.0)
             rz = getattr(self.env, "_softsonic_residual", None)
             self._frame_data[i]["residual"].append(
                 rz[i].cpu().numpy().copy() if rz is not None else np.zeros(1, dtype=np.float32))
@@ -388,6 +396,8 @@ class TrajectoryRecorderTerm(recorder_manager.RecorderTerm):
                 trajectory["force_setpoint_w"] = np.array(data["force_setpoint_w"])
             if data.get("residual"):
                 trajectory["residual"] = np.array(data["residual"])
+            if data.get("rigid_limit"):
+                trajectory["rigid_limit"] = np.array(data["rigid_limit"])
             if data.get("force_actual_w"):
                 trajectory["force_actual_w"] = np.array(data["force_actual_w"])
                 trajectory["force_desired_w"] = np.array(data["force_desired_w"])
