@@ -464,6 +464,18 @@ def apply_softsonic_force_field(
     env._softsonic_rigid_limit = torch.where(  # noqa: SLF001
         want_n > 1e-6, k_ff * dp_n / want_n.clamp(min=1e-6), torch.ones_like(want_n)
     )
+    # 机器人期望刚度 k_robot。数据数组里没有这一列，但由刚性极限的定义可精确反推：
+    #     rigid_limit = 1 + k_ff/k_robot  =>  k_robot = k_ff / (rigid_limit - 1)
+    # 对照 SoftMimic 给 critic 的 desired_stiffness_log。k_robot 固定时该量是常数、
+    # 给了也没信息；一旦按上游对数均匀采样（10~1000 N/m），它就是 critic 判断
+    # "这一帧该让多少"的关键信息。rigid_limit 趋近 1 的帧（力场远软于机器人，刚柔
+    # 无差别）分母会爆，填 0。
+    _rl = env._softsonic_rigid_limit  # noqa: SLF001
+    env._softsonic_robot_stiffness = torch.where(  # noqa: SLF001
+        _rl > 1.0 + 1e-3,
+        k_ff / (_rl - 1.0).clamp(min=1e-3),
+        torch.zeros_like(k_ff),
+    )
     env._softsonic_active = active.clone()  # noqa: SLF001
     env._softsonic_k_ff = k_ff.clone()  # noqa: SLF001  critic 特权观测用
 

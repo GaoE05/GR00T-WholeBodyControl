@@ -1,0 +1,6 @@
+# SoftSONIC：机器人期望刚度 k_robot 的对数。仅供 critic。
+# 对照 SoftMimic 的 desired_stiffness_log（其 PolicyCfg 里置 None，critic-only）。
+# 只在 k_robot 随机化的数据集上使用；固定刚度时它是常数，挂上去只会白增维度。
+softsonic_robot_stiffness_log:
+  _target_: isaaclab.managers.ObservationTermCfg
+  func: gear_sonic.envs.manager_env.mdp:softsonic_robot_stiffness_log

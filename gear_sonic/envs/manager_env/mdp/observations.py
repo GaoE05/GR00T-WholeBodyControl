@@ -285,6 +285,7 @@ class PrivilegedCfg(ObsGroup):
     softsonic_force_desired = None
     softsonic_ff_stiffness_log = None
     # SoftSONIC：让 critic 看得见 q_aug（对照 SoftMimic 的 adapted_* 整套）
+    softsonic_robot_stiffness_log = None
     softsonic_joint_pos_aug_error = None
     softsonic_body_pos_aug_error_b = None
 
@@ -535,6 +536,21 @@ def softsonic_ff_stiffness_log(env: ManagerBasedEnv) -> torch.Tensor:
     无力场的帧 k_ff=0，取 log1p 保证在 0 处有定义且单调。
     """
     k = _softsonic_buffer(env, "_softsonic_k_ff", 1)
+    return torch.log1p(k.clamp(min=0.0))
+
+
+def softsonic_robot_stiffness_log(env: ManagerBasedEnv) -> torch.Tensor:
+    """机器人期望刚度 k_robot 的对数，形状 (num_envs, 1)。**仅供 critic**。
+
+    对照 SoftMimic 的 ``desired_stiffness_log``（``PolicyCfg`` 里置 None，属
+    critic-only 特权观测）。取对数的理由与 ``softsonic_ff_stiffness_log`` 相同：
+    上游按**对数均匀**采样（constants.py:41-42，10~1000 N/m），线性尺度下量纲跨
+    两个数量级会压垮输入归一化。
+
+    仅在 k_robot 被随机化时才有信息 —— 固定 45 N/m 的数据集上它是常数，
+    不要挂到那条配置上（会白白增加 critic 输入维度并逼迫 critic 重新初始化）。
+    """
+    k = _softsonic_buffer(env, "_softsonic_robot_stiffness", 1)
     return torch.log1p(k.clamp(min=0.0))
 
 
