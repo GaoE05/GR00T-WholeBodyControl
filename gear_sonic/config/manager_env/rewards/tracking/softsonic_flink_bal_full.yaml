@@ -1,0 +1,141 @@
+# v20 = 最大限度对齐 SoftMimic 力控实验的完整基线。
+#
+# 对齐清单（上游 g1_force_control.py 的 __post_init__ 里显式动过的每一项）：
+#   action_rate_l2                       -0.01        ✓ 本文件
+#   contact_forces = None                -> undesired_contacts 0.0   ✓ 命令行
+#   ang_vel_xy_l2 = None                 -> anti_shake_ang_vel 0.0   ✓ 本文件
+#   lin_vel_z_l2 = None / height_exp=None -> 我们无对应项
+#   dof_pos_limits                       -10.0        ✓ joint_limit 本就相同
+#   force_link_keypoint_tracking         3.0 σ=0.1    ✓ 本文件
+#   force_link_keypoint_orientation      3.0 σ=0.1    ✓ 本文件
+#   force_command_tracking               2.0 σ=20.0   ✓ 本文件（σ 保持上游值）
+#   torque_command_tracking              2.0 σ=2.0    ✓ 本文件
+#   joint_deviation_upper_body_commanded 2.0 σ=1.0    ✓ 本文件（新增）
+#   terminations.bad_orientation = None  -> anchor_ori_full=null     ✓ 命令行
+#   数据 zero-wrench 占 1/3                            ✓ v8_hybrid_zw13
+#   critic 看 q_aug（adapted_* 整套）                  ✓ critic 观测组
+#
+# ── 为什么 tracking 主干仍是 SONIC 的（不是漏对齐，是架构决定）────────────
+# anchor_pos/ori、relative_body_pos/ori、vr_5point、body_linvel/angvel（合计
+# 7.0）正是冻结 ATM 当初训练时的目标。换成 SoftMimic 的 keypoint 体系等于让残差
+# 在与冻结底座不一致的目标下优化，直接制造对抗。且上游的 track_lin_vel_xy_exp /
+# track_ang_vel_z_exp 是 locomotion 的**速度指令**，stationary 没有该指令项；
+# gravity_exp、feet_stumble、joint_deviation_contacts_commanded 依赖其
+# upper_body_joints 命令 API，我们没有。
+#
+# ── 刻意不做，理由在案 ────────────────────────────────────────────────────
+# * collision-emulator 数据（上游占 1/3）：实测在 stand 上产出 **0.0% 有力帧**
+#   （forcefield 68.7% / collision 0.0% / zero-wrench 0.0%）。原因见
+#   force_profile.py:60,142，事件按连杆速度概率采样，站立时速度≈0 几乎全被拒。
+#   照搬会把无力数据从 1/3 推到 2/3，是抄了模式名没抄到内容。留给 walk 线。
+# * latent_residual_l2：我们自己加的项，非上游。v16 跑 3804 迭代为空结果
+#   （compliance 0.617~0.638 vs v14 的 0.628；forced/idle 1.071 vs 1.049）。已否决。
+# * σ_force 20->3：我们自己的偏离，v15 负结果（aug_joint 0.15~0.17 vs 0.102）。已退回。
+#
+# softsonic_flink_bal.yaml 若有增减，这里要同步。
+
+defaults:
+  - terms/tracking_anchor_pos@_here_
+  - terms/tracking_anchor_ori@_here_
+  - terms/tracking_relative_body_pos@_here_
+  - terms/tracking_relative_body_ori@_here_
+  - terms/tracking_body_linvel@_here_
+  - terms/tracking_body_angvel@_here_
+  - terms/action_rate_l2@_here_
+  - terms/joint_limit@_here_
+  - terms/undesired_contacts@_here_
+  - terms/anti_shake_ang_vel@_here_
+  - terms/tracking_vr_5point_local@_here_
+  - terms/feet_acc@_here_
+  - terms/applied_force_tracking@_here_
+  - terms/applied_torque_tracking@_here_
+  - terms/alive@_here_
+  - terms/compliant_force_link_pos@_here_
+  - terms/compliant_force_link_ori@_here_
+  - terms/tracking_compliant_joint_pos@_here_
+
+_target_: gear_sonic.envs.manager_env.mdp.rewards.RewardsCfg
+
+# A：只改 func，权重保持与发布配置一致
+tracking_anchor_pos:
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_anchor_pos_error
+tracking_anchor_ori:
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_anchor_ori_error
+tracking_relative_body_pos:
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_relative_body_pos_error
+tracking_relative_body_ori:
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_relative_body_ori_error
+tracking_vr_5point_local:
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_local_vr_5point_error
+tracking_body_linvel:
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_body_linvel_error
+tracking_body_angvel:
+  func: gear_sonic.envs.manager_env.mdp:tracking_compliant_body_angvel_error
+
+# feet_acc：仓库项文件的默认值是 -2.5e-7，但发布 checkpoint 实际训练时用的是
+# -2.5e-06（见 sonic_release/config.yaml），差 10 倍。我们冻结该 checkpoint 的 ATM
+# 只训 residual，配方应与它一致，故显式对齐到发布值。
+feet_acc:
+  weight: -2.5e-06
+
+# ── 权重：回到 SoftMimic 原值（v20 修订 v12 的配平）──────────────────────
+# v12 曾把上游的 3.0/3.0 下调到 2.0/1.0，依据是 v9a 实测 3.0/3.0 相对无该项的
+# v9b：compliance 更高(0.477 vs 0.443) 但 error_joint_pos_aug 明显更差
+# (0.227 vs 0.167)，判为"单点被过度加权、牺牲全身跟踪"。
+#
+# v20 改回 3.0/3.0，因为那次判断有一个未控变量：**v9a 没有 joint_deviation 项**。
+# 上游的 3.0/3.0 是和 joint_deviation_upper_body_commanded(2.0，全 29 DOF) 共存
+# 的，后者是全身跟踪项，正好补偿 3.0/3.0 对全身跟踪的稀释。分开测恰恰制造了那个
+# 误导性负结果。两项一起上之后配比与上游基本一致：
+#   我们  正权重和 20.5，力相关 (3+3+2+2)=10.0，占 48.8%
+#   上游  正权重和 19.0，力相关 (3+3+2+2)=10.0，占 52.6%
+compliant_force_link_pos:
+  weight: 3.0
+compliant_force_link_ori:
+  weight: 3.0
+
+# v18 起：对齐上游力控实验显式改过的两项惩罚
+action_rate_l2:
+  # 上游写 -0.01，但**不能直接抄这个数** —— 量纲基准不同：
+  #   SoftMimic  JointPositionActionCfg(scale=0.5)  -> action_manager.action = 2*(target-default)
+  #   我们        JointPositionActionCfg(无 scale)   -> scale 默认 1.0（已核 actions_cfg.py:35）
+  #                                                 -> action_manager.action = 1*(target-default)
+  # action_rate_l2 = Σ(Δa)² 按 scale^-2 缩放，故同样的物理关节目标变化下上游的数值是
+  # 我们的 4 倍。量纲等价值 = -0.01 × 4 = **-0.04**。
+  #
+  # 附实测：这一项的量级本来就可忽略，改它不影响结果，此处只求量纲正确。
+  #   v14(w=-0.1)  Episode_Reward/action_rate_l2 = -0.37 / 正项合计 ~33 = 1.1%
+  #   v20(w=-0.01) Episode_Reward/action_rate_l2 = -0.042 / 正项合计 ~41 = 0.1%
+  # 也就是说 v18 里"把 action_rate_l2 从 -0.1 降到 -0.01 是在给柔顺行为减税"这个
+  # 判断**定量上是错的**，它从来不是有存在感的项。同理 anti_shake_ang_vel 在 v14
+  # 只有 -0.005（0.015%）。v18 的 forced/idle 改善只能归因于 zero-wrench 数据与
+  # critic 看 q_aug 这两项。
+  weight: -4e-2
+anti_shake_ang_vel:
+  weight: 0.0
+
+
+# ── σ_force 为什么保持上游的 20.0（这是本配方里最需要说明的一处）──────────
+# 实测本配方各项的逐步平均奖励（用 alive/1.5 归一 episode 长度）：
+#   applied_force_tracking      0.94  <- 饱和，几乎无梯度
+#   compliant_force_link_pos    0.88
+#   applied_torque_tracking     0.87
+#   tracking_vr_5point_local    0.86
+#   compliant_force_link_ori    0.74
+#   tracking_compliant_joint_pos 0.45 <- 唯一有充分动态范围的项
+#
+# applied_force_tracking 确实饱和了，根因是量纲：
+#   我们  力 = k_robot × 位移 = 45 × U[0,0.25] = U[0,11.25] N（实测 max 11.15 N）
+#   上游  k_robot 对数均匀采样，位移上限 min(0.7,140/k)，力跨到 140 N
+# 即**是我们自己的两项改动（固定 k45、d25 位移上限）把力压小了**，σ=20 才失效。
+#
+# 但不按量纲折算改 σ，三条理由：
+# 1. 折算值 = 20 × 11.25/140 = **1.6 N**，比 v15 试过并失败的 3.0 还激进
+#    （v15：aug_joint 从 0.102 恶化到 0.15~0.17，compliance 无提升）。
+# 2. 反方向的"真对齐"是把数据改回上游（k_robot 随机 + 去掉位移上限），但固定 k45
+#    是用户认可的简化、d25 位移上限是 A 类已验证有效的改动，本轮不动。
+# 3. **力目标并没有因此失去梯度** —— compliant_force_link_pos/ori（σ=0.1 m）量的是
+#    同一件物理事情（手有没有让到该让的位置），实测 0.88/0.74，动态范围正常，
+#    且上游也是把位置/朝向项(3.0+3.0)压过力/力矩项(2.0+2.0)。
+#
+# 结论：σ 保持 20.0，饱和作为已知后果记录在案，留作 v21 的单变量实验。
