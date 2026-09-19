@@ -109,6 +109,19 @@ class ManagerEnvWrapper:
         # 代码路径（同样的观测、同样的 ATM、同样的力场），两者只差 Δz 这一项，
         # 对比才干净。
         self._zero_latent_residual = self.config.get("zero_latent_residual", False)
+        # SoftSONIC 诊断：把 Δz 固定成一个常量向量，用来量"闭环权限"。
+        #
+        # 背景：开环探针（scripts/probe_residual_feasibility.py）在固定观测下优化 Δz，
+        # 证明 latent 能表达所需的关节变化。但真实运行是闭环 —— ATM 的 actor_obs 就是
+        # 本体感知，它是个反馈跟踪控制器：Δz 让机器人偏离 q_ref 后，编码器会输出一个
+        # "拉回"的修正，残差每步都得先抵消它。若环路增益高，Δz 的净效果会被大幅衰减。
+        # 本钩子注入固定 Δz 做冻结 rollout，量闭环实际位移 / 开环预测位移 = 权限比。
+        #
+        # 值的语义：文件里存的就是**缩放后的 Δz 本身**（FSQ token 单位，与日志里的
+        # residual_norm 同一空间），不再乘 latent_residual_scale，但**仍过同样的裁剪**
+        # 以保持与训练时一致。zero_latent_residual 优先级在前。
+        self._const_latent_residual_path = self.config.get("const_latent_residual", None)
+        self._const_latent_residual = None  # 首次用时加载并缓存
         # replay 通路回放 q_aug 而非 q_ref（见 _update_replay_frame）
         self._replay_use_aug = self.config.get("replay_use_aug", False)
 
@@ -357,6 +370,30 @@ class ManagerEnvWrapper:
         """
         if self._zero_latent_residual:
             return torch.zeros_like(scaled_residual)
+        if self._const_latent_residual_path is not None:
+            if self._const_latent_residual is None:
+                v = torch.load(
+                    self._const_latent_residual_path,
+                    map_location=scaled_residual.device,
+                    weights_only=False,
+                )
+                if not isinstance(v, torch.Tensor):
+                    raise TypeError(
+                        f"const_latent_residual 文件里应是 torch.Tensor，实得 {type(v)}"
+                    )
+                v = v.to(device=scaled_residual.device, dtype=scaled_residual.dtype).reshape(-1)
+                if v.numel() != scaled_residual.shape[-1]:
+                    raise ValueError(
+                        f"const_latent_residual 维度 {v.numel()} 与 latent 维度 "
+                        f"{scaled_residual.shape[-1]} 不符"
+                    )
+                self._const_latent_residual = v
+                print(  # noqa: T201
+                    f"[SoftSONIC] 使用常量 Δz：{self._const_latent_residual_path}，"
+                    f"‖Δz‖={v.norm().item():.4f}，逐维最大 {v.abs().max().item():.4f}",
+                    flush=True,
+                )
+            scaled_residual = self._const_latent_residual.expand_as(scaled_residual)
         if self._latent_residual_clip is None:
             return scaled_residual
         c = self._latent_residual_clip
