@@ -104,3 +104,20 @@ tracking_body_angvel:
   func: gear_sonic.envs.manager_env.mdp:tracking_compliant_body_angvel_error
 feet_acc:
   weight: -2.5e-06
+
+# ── force_link 的 σ 必须跟着数据的柔顺幅度走（2026-09-19）───────────────────
+# σ=0.1 m 是 SoftMimic 的值，匹配的是**他们**的腕部位移量级。我们 d25 时腕部位移
+# 中位 5.1 cm，σ=0.1 恰好（e/σ=0.51，接近最优梯度点 0.707）。
+# 换到 d1545（退让区间 U[0.15,0.45]）后腕部位移中位变成 **18.1 cm**，e/σ=1.81
+# 已进饱和区，起点梯度只剩最优的 16% —— 增益看着有 96% 却学不动。
+# 取 σ=0.20：e/σ=0.91，起点梯度为最优的 93%。
+# 这是"改了数据忘了改 σ"的又一次实例，已加进 scripts/preflight_check.py 自动拦截。
+#
+# 注意原生三项实测 e/σ 分别是 relative_body_pos 0.57 / anchor_pos 0.41 /
+# vr_5point 0.86，**都在有效带 [0.2, 1.5] 内，不要动**。
+compliant_force_link_pos:
+  params:
+    std: 0.20
+compliant_force_link_ori:
+  params:
+    std: 0.20
