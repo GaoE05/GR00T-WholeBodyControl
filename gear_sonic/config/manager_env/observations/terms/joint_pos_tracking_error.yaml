@@ -1,0 +1,6 @@
+# SoftSONIC：关节跟踪误差 q - q_target，正比于外部关节力矩。真机可获取。
+# 依据 SoftMimic 论文 Sec.III-B：上游明确靠 q_{t-1} 与 joint position target a_{t-1}
+# 的差来推断外力。
+joint_pos_tracking_error:
+  _target_: isaaclab.managers.ObservationTermCfg
+  func: gear_sonic.envs.manager_env.mdp:joint_pos_tracking_error

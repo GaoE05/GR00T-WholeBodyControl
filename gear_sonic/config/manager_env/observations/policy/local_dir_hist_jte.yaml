@@ -1,0 +1,8 @@
+# local_dir_hist + 关节跟踪误差（q - q_target）。
+# 必须配合 policy_atm 组使用，否则会改变被 checkpoint 锁死的 ATM 输入维度（930）。
+defaults:
+  - local_dir_hist@_here_
+  - ../terms/joint_pos_tracking_error@_here_
+
+joint_pos_tracking_error:
+  history_length: ${actor_prop_history_length}

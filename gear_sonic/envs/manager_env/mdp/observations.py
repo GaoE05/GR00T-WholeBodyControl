@@ -163,6 +163,8 @@ class PolicyCfg(ObsGroup):
     #   B 结构问题 —— 能看见力，但"冻结 ATM + 残差"这条路本身有上限。
     # 喂了力还学不出柔顺 => B；学得出 => A，后续投入应放在感知侧。
     softsonic_force_desired_policy = None
+    # SoftSONIC：关节跟踪误差 q - q_target，正比于外部力矩（上游据此推断外力）
+    joint_pos_tracking_error = None
 
 
 @configclass
@@ -558,6 +560,36 @@ def softsonic_ff_stiffness_log(env: ManagerBasedEnv) -> torch.Tensor:
     """
     k = _softsonic_buffer(env, "_softsonic_k_ff", 1)
     return torch.log1p(k.clamp(min=0.0))
+
+
+def joint_pos_tracking_error(
+    env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> torch.Tensor:
+    """关节跟踪误差 q - q_target，形状 (num_envs, num_joints)。**正比于外部关节力矩。**
+
+    依据 SoftMimic 论文 Sec.III-B "Observation Content"：
+      "the policy directly observes neither the wrench nor displacement information,
+       but can make inferences about them based on proprioceptive sensing. ...
+       For an admittance strategy, the external wrench can be inferred from the robot's
+       dynamics, using observations of previous joint position q_{t-1}, **joint position
+       target a_{t-1}**, joint velocity and joint accelerations."
+    即上游明确是靠"关节位置 vs 关节位置目标"的差来推断外力的。我们的 policy 组里
+    joint_pos 和 actions 两项都有，但网络要自己跨两组各 290 维的历史去发现这个减法，
+    且该特征还被 ATM 自身的反馈部分抵消。这里把它显式给出。
+
+    量纲（已核）：``joint_pos_rel`` = q − q_default，``last_action`` = a，而动作项是
+    ``JointPositionActionCfg`` 且 **我们的 scale 是默认的 1.0**（见 actions_cfg.py:35），
+    故 q_target = q_default + 1.0·a，二者之差恰为 **q − q_target**，单位弧度，无需缩放。
+    注意 SoftMimic 的 scale=0.5，同样的减法在他们那里**不等于**跟踪误差。
+
+    真机可获取（关节编码器 + 下发的位置目标），不是特权信息。
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    joint_pos_rel = (
+        asset.data.joint_pos[:, asset_cfg.joint_ids]
+        - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
+    )
+    return joint_pos_rel - env.action_manager.action[:, asset_cfg.joint_ids]
 
 
 def softsonic_force_desired_policy(env: ManagerBasedEnv) -> torch.Tensor:

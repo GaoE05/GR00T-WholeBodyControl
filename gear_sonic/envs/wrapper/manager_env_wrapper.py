@@ -1173,6 +1173,24 @@ class ManagerEnvWrapper:
                             extras["to_log"]["softsonic/compliance"] = comp.mean()
                             extras["to_log"]["softsonic/rigid_limit"] = lim[ok].mean()
 
+                # 主评价指标：归一化柔顺完成度（0=刚性，1=到达柔顺目标）。
+                # 与数据集量级无关，也不被 29 关节平均稀释 —— 见
+                # rewards.softsonic_compliance_progress 的 docstring。
+                try:
+                    from gear_sonic.envs.manager_env.mdp.rewards import (
+                        softsonic_compliance_progress,
+                    )
+
+                    _prog, _den = softsonic_compliance_progress(self.env)
+                    if _prog is not None and _prog.numel() > 0:
+                        extras["to_log"]["softsonic/compliance_progress"] = _prog.mean()
+                        extras["to_log"]["softsonic/compliance_progress_median"] = (
+                            _prog.median()
+                        )
+                        extras["to_log"]["softsonic/compliance_demand_m"] = _den.mean()
+                except Exception as _exc:  # noqa: BLE001
+                    logger.warning(f"[SoftSONIC] compliance_progress 失败: {_exc}")
+
         new_obs = self.process_raw_obs(obs_dict, flatten_dict_obs=True)
         # Store obs for action_transform_module when obs_dict is not provided in next step()
         self._last_obs_dict = new_obs

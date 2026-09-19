@@ -1,0 +1,108 @@
+# @package _global_
+# =============================================================================
+# clean_v6 = clean_v5 + 把关节跟踪误差 q-q_target 显式喂给 policy
+#
+# 依据 SoftMimic 论文 Sec.III-B：上游明确靠 q_{t-1} 与 joint position target a_{t-1}
+# 的差来推断外力。我们的 policy 组里 joint_pos 和 actions 都有，但网络要自己跨两组
+# 各 290 维的历史去发现这个减法。policy_atm 组同时加入，以保证被 checkpoint 锁死的
+# ATM 输入（930 维）不变 —— 已用 scripts/verify_policy_atm.py 逐位验证（最大差 0.000e+00）。
+# =============================================================================
+# 唯一差别是奖励组。依据是定量的：只用原生 12 项时，"刚性->柔顺"的奖励增益仅占
+# 总奖励 2.48%，而 PPO 的 reward 波动是 ±12% —— 信号被噪声淹没一个数量级。
+# 加上 force_link(σ0.1,w3.0) 提到 11.12%，再加 force_cmd(σ20,w2.0) 到 12.85%。
+# 详见 rewards/tracking/compliant_native_flink.yaml 的说明。
+# =============================================================================
+defaults:
+  - /algo: ppo_im_phc
+  - /manager_env: base_env
+  - /callbacks/read_eval
+  - /callbacks/im_resample
+  - override /trainer: trl
+  - override /actor_critic: mlp
+  - override /manager_env/observations/tokenizer: unitoken_all_noz
+  - override /manager_env/observations/policy: local_dir_hist_jte
+  - override /manager_env/observations/policy_atm: local_dir_hist
+  - override /manager_env/observations/critic: privileged_mf_hist
+  - override /manager_env/events: tracking/sonic_ff
+  - override /manager_env/terminations: tracking/compliant_relaxed
+  - override /manager_env/rewards: tracking/compliant_native_flink_joint_s10
+
+use_manager_env: true
+exp_base: ${hydra:runtime.choices.exp}
+exp_var: s2
+experiment_name: ${exp_base}_${exp_var}
+experiment_dir: ${base_dir}/${project_name}/${experiment_name}-${timestamp}
+num_envs: 4096
+project_name: SoftSONIC_PRO5000
+
+actor_prop_history_length: 10
+actor_actions_history_length: 10
+critic_prop_history_length: 10
+critic_actions_history_length: 10
+
+manager_env:
+  config:
+    robot:
+      type: g1_model_12_dex
+    terrain_type: trimesh
+    action_transform_module_cfg: sonic_release/atm_export.yaml
+    action_transform_module_checkpoint: sonic_release/last.pt
+    meta_action_dim: 64
+    tokenizer_action_dim: 64
+    # ── 本项目的核心：在冻结 ATM 的 FSQ latent 上加残差 ──
+    use_latent_residual: true
+    latent_residual_mode: post_quantization
+    latent_residual_scale: 0.15
+    latent_residual_clip: 0.5
+    action_clip_value: 3.0
+  commands:
+    motion:
+      reward_point_body: ["torso_link", "left_wrist_yaw_link", "right_wrist_yaw_link"]
+      reward_point_body_offset: [[0.0, 0.0, 0.5], [0.0, -0.0, 0.0], [0.0, -0.0, 0.0]]
+      num_future_frames: 10
+      dt_future_ref_frames: 0.1
+      encoder_sample_probs: { g1: 1.0, teleop: 0.0, smpl: 0.0 }
+      # reset 不设 reset_from_compliant_target，即走 SONIC 原生：reset 到主 motion
+      # (q_ref)。这与奖励/终止的目标 q_aug 不同，但**是自洽的且是刻意的**：
+      #   1. ATM 跟踪的就是 q_ref，把机器人放在 q_ref 上才与冻结底座一致；放到
+      #      q_aug 上 ATM 会立刻往回拉，制造一个人为瞬态（实测早期 reward 反而更低）。
+      #   2. 这才是部署时的真实条件 —— 机器人正常跟踪，外力到来，它要让开。
+      #      每次 reset 都提供一次"从刚性起步、必须让开"的完整学习信号。
+      #   3. 开局误差（骨盆位移 k450 中位 6.3 cm / p90 19.3 cm）远小于放宽后的
+      #      0.30 终止阈值，不会被立刻杀掉。
+      #   4. 不需要任何补丁，是原生行为。
+      motion_lib_cfg:
+        motion_file: /mnt/data/temp_user/yi.gao/outputs/cma/motionlib/dual_k450
+        smpl_motion_file: "zeros"
+
+algo:
+  config:
+    # PPO 超参**全部沿用 ppo_im_phc / sonic_release 的原生值**，不再引入
+    # SoftMimic Table II 的那一套（residual_v2 曾把 actor_lr 提到 1e-3、
+    # init_noise_std 提到 0.4、max_grad_norm 提到 1.0、critic 换成 [512]x4 ELU）。
+    #
+    # 唯一保留的改动是 actor 的 zero_init_output —— 残差头必须从 Δz=0 起步，
+    # 否则一开始就会破坏冻结底座的输出，这不是调参而是结构要求。
+    #
+    # 已知风险与判据：sonic_release 的 actor_learning_rate 是 2e-5，那是它自己
+    # 训练后期的值；我们的残差头是全新零初始化的网络，可能学得过慢。
+    # 判据写在 manager_env_wrapper.py 的注释里：**1~2k 迭代后 ‖Δz‖ 仍全程趋近 0
+    # 就说明学习率太低**。先按原生值跑，观察到该现象再动，不预先调。
+    # ppo_im_phc 的默认 max_grad_norm 是 1.0，但 sonic_release 实际用的是 0.1。
+    # 我们要复现的是**发布 checkpoint 那次训练的配方**，故显式对齐到 0.1。
+    max_grad_norm: 0.1
+    # 同样是补回 sonic_release 里有、而 ppo_im_phc 默认没有的设置。
+    # 漏掉它的后果实测很严重：探索噪声 std 从 0.05 一路涨到 **1.10** 无人约束，
+    # ‖Δz‖ 同步涨到 1.587，而 augJ 从 0.0456 退化到 0.0863 —— PPO 在纯粹地
+    # 最大化熵，因为任务信号（刚性->柔顺仅占总奖励 2.48%）给不出梯度。
+    #
+    # 注意熵项还有一个量纲问题：entropy_coef=0.01 是 SONIC 为 **29 维关节动作**
+    # 调的，而我们的动作是 **64 维 latent 残差**。高斯熵 H=d/2*log(2*pi*e*sigma^2)
+    # 与维数成正比，同系数下熵项绝对量值是 SONIC 的 2.21 倍。本次先只补回原生的
+    # 钳制（不动 entropy_coef），把"补回原生"和"按量纲改系数"分开验证。
+    use_clampped_std: true
+    std_clamp_min: 0.001
+    std_clamp_max: 0.5
+    actor:
+      backbone:
+        zero_init_output: true

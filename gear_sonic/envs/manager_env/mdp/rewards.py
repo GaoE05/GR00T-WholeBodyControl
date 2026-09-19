@@ -847,6 +847,70 @@ def _force_link_anchored_target(env, command_name: str, want_quat: bool = False)
     return rows, cols, (anchored, quat_mul(a_rot, tgt_quat)), active
 
 
+def softsonic_compliance_progress(env, command_name: str = "motion"):
+    """**主评价指标**：受力连杆的归一化柔顺完成度。返回 ``(值, 有效掩码)``。
+
+        progress = 1 - ‖p_robot - p_aug‖ / ‖p_ref - p_aug‖
+
+      0  = 机器人停在刚性参考 p_ref（完全不柔顺）
+      1  = 精确到达柔顺目标 p_aug
+      <0 = 比不柔顺还差（被推到了 p_aug 的反方向）
+
+    为什么需要它（三条都是踩过的坑）：
+
+    1. **与数据集量级无关。** 分母是该帧"从刚性到柔顺要走多远"，所以 d25/d45/d1545
+       这些柔顺幅度不同的数据集之间可以直接比。此前用"受力连杆误差(cm)"做判据，
+       换数据集后参照系变了却拿旧基线比，导致过误判（把 5.96cm 误判为劣于 4.38cm，
+       而该数据集的 frozen 基线其实是 6.03cm）。
+    2. **不被跟踪噪声稀释。** 只看受力连杆那一个点，而不是 29 个关节取平均 ——
+       ``error_joint_pos_aug`` 在 k45/k150 两个力量级下都是 0.046~0.047、力涨 3.3 倍
+       纹丝不动，证明它测不出柔顺。
+    3. **不需要从奖励反解。** 此前只能用 exp(-e²/σ²) 反推 e，既间接又依赖归一化基准。
+
+    只在力场活跃的帧上有效（掩码），无力帧没有"柔顺"可言。
+    """
+    from isaaclab.utils.math import quat_rotate
+
+    fb = getattr(env, "_softsonic_active_force_body", None)
+    if fb is None:
+        return None, None
+    active = fb >= 0
+    if not active.any():
+        return None, None
+    rows = active.nonzero(as_tuple=False).squeeze(-1)
+    cols = fb[rows]
+
+    command = env.command_manager.get_term(command_name)
+    ml = command.motion_lib
+    total = ml.get_time_step_total(command.motion_ids)
+    steps = torch.clamp(
+        command.motion_start_time_steps + command.time_steps,
+        torch.zeros_like(total), total - 1,
+    )
+    a_rot = env._softsonic_ff_anchor_rot[rows]        # noqa: SLF001
+    a_pos = env._softsonic_ff_anchor_pos[rows]        # noqa: SLF001
+    a_ref = env._softsonic_ff_anchor_ref_pos[rows]    # noqa: SLF001
+    org = env.scene.env_origins[rows]
+
+    def _anchor(raw):
+        """与力场/奖励完全相同的锚定：只锚 XY+偏航，Z 保持数据原值。"""
+        out = quat_rotate(a_rot, raw - a_ref) + a_pos
+        out[:, 2] = raw[:, 2]
+        return out
+
+    p_aug = _anchor(ml.get_body_pos_w_aug_full(command.motion_ids, steps)[rows, cols] + org)
+    p_ref = _anchor(ml.get_body_pos_w_full(command.motion_ids, steps)[rows, cols] + org)
+    p_rob = env.scene["robot"].data.body_pos_w[rows, cols]
+
+    denom = (p_ref - p_aug).norm(dim=-1)
+    # 分母过小的帧（该帧本就几乎不需要柔顺，多在力斜坡起止段）无信息量，剔除。
+    ok = denom > 0.01
+    if not ok.any():
+        return None, None
+    prog = 1.0 - (p_rob - p_aug).norm(dim=-1)[ok] / denom[ok]
+    return prog, denom[ok]
+
+
 def compliant_force_link_pos_error(
     env: ManagerBasedRLEnv,
     command_name: str = "motion",
