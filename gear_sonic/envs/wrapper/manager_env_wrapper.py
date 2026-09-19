@@ -417,10 +417,30 @@ class ManagerEnvWrapper:
         # 只在设置了 SOFTSONIC_DUMP_ATM_OBS 时触发，且只导出一次，对训练无影响。
         # 用真实观测（而非随机张量）才能测准 FSQ 量化后 token 对 residual 的灵敏度。
         dump_path = os.environ.get("SOFTSONIC_DUMP_ATM_OBS")
-        if dump_path and not getattr(self, "_softsonic_atm_obs_dumped", False):
-            self._softsonic_atm_obs_dumped = True
+        # 延后若干步再导出：本函数在动作处理阶段执行，而力场事件在同一步的更晚阶段
+        # （顺序 终止->奖励->指令推进->事件），所以第 0 步时 _softsonic_force_* 还不存在，
+        # 导出的 payload 会缺外力。默认等 50 步，届时力场已跑过多次。
+        # SOFTSONIC_DUMP_ATM_OBS_EVERY>0 时改为**跨时刻累积**：每 EVERY 步采一次，
+        # 攒够 COUNT 次后拼接存盘。单次 dump 的 4096 个样本全来自同一时刻，力事件
+        # 组合极少，用来做可学习性检查会严重过拟合（实测训练误差 4%、测试 97%）。
+        _after = int(os.environ.get("SOFTSONIC_DUMP_ATM_OBS_AFTER", "50"))
+        _every = int(os.environ.get("SOFTSONIC_DUMP_ATM_OBS_EVERY", "0"))
+        _count = int(os.environ.get("SOFTSONIC_DUMP_ATM_OBS_COUNT", "1"))
+        _n = getattr(self, "_softsonic_dump_calls", 0) + 1
+        self._softsonic_dump_calls = _n
+        _hit = (_n >= _after) and (_every <= 0 or (_n - _after) % _every == 0)
+        if dump_path and _hit and not getattr(self, "_softsonic_atm_obs_dumped", False):
+            if _every > 0:
+                _buf = getattr(self, "_softsonic_dump_buf", [])
             payload = {k: v.detach().cpu() for k, v in atm_obs_dict.items()
                        if isinstance(v, torch.Tensor)}
+            # SoftSONIC：一并存下该帧的期望外力，供"可学习性检查"做
+            # "本体感知 vs 本体感知+力"的对照（见 scripts/probe_learnability.py）。
+            for _k, _attr in (("softsonic_force_desired", "_softsonic_force_desired"),
+                              ("softsonic_force_actual", "_softsonic_force_actual")):
+                _v = getattr(self.env, _attr, None)
+                if _v is not None:
+                    payload[_k] = _v.detach().cpu()
             # 一并存下柔顺目标与参考关节角，供可行性测试使用：
             # 问题是"冻结解码器的像空间里存不存在一个 Δz 使输出达到 q_aug"。
             # 动作项是 JointPositionAction + use_default_offset，scale=1，
@@ -437,6 +457,22 @@ class ManagerEnvWrapper:
                 payload["joint_names"] = list(robot.data.joint_names)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"[SoftSONIC] 柔顺目标导出失败: {exc}")
+            # 累积模式：payload 此时才算填完整（dof_pos_aug/ref 在上面的 try 里补的），
+            # 拼接必须放在这里，放在前面会被后补的字段覆盖成单次的量。
+            if _every > 0:
+                _buf.append(payload)
+                self._softsonic_dump_buf = _buf
+                print(f"[SoftSONIC] 累积 dump {len(_buf)}/{_count}", flush=True)  # noqa: T201
+                if len(_buf) < _count:
+                    self._softsonic_atm_obs_dumped = False
+                    return atm_obs_dict
+                _names = _buf[0].get("joint_names")
+                payload = {
+                    k: torch.cat([d[k] for d in _buf], dim=0)
+                    for k in _buf[0] if isinstance(_buf[0][k], torch.Tensor)
+                }
+                payload["joint_names"] = _names
+                self._softsonic_atm_obs_dumped = True
             torch.save(payload, dump_path)
             logger.info(f"[SoftSONIC] dumped ATM obs batch -> {dump_path}")
 
