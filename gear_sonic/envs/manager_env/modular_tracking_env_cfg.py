@@ -1012,6 +1012,12 @@ class ModularTrackingEnvCfg(ManagerBasedRLEnvCfg):
         self.scene.robot = robot_mapping[robot_type]["robot_cfg"].replace(
             prim_path="{ENV_REGEX_NS}/Robot"
         )
+        if getattr(self.events, "softsonic_force_field", None) is not None:
+            # B1: install the project-owned physical-step world-wrench hold via
+            # IsaacLab's public asset class_type extension point.
+            from .softsonic_articulation import SoftSONICArticulation
+
+            self.scene.robot.class_type = SoftSONICArticulation
         self.actions.joint_pos.scale = robot_mapping[config["robot"].get("type", "g1")][
             "action_scale"
         ]

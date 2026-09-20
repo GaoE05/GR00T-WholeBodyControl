@@ -262,9 +262,9 @@ def apply_softsonic_force_field(
 
     ## 活跃判据
 
-    用 ``k_ff > 0``，不用 ``‖F‖`` 或 ``force_body_id >= 0``。上游 ``runner.py:427``
-    里 ``ff_stiffness`` 初始为 0、只在 ``current_event`` 存在时才赋值，是"当前有事件
-    正在施力"的精确标记；而 body id 含尚未开始的排队事件，力阈值会把斜坡起止段误判。
+    用非零平移或旋转场刚度，不用期望力幅值（居中弹簧、纯力矩也可有效）。
+    数据入口必须先通过 forcefield 契约；上游回滚可能导出正刚度的失效设定点
+    （N1），因此不能仅由正刚度宣称源 metadata 已校验。
 
     ## 时序
 
@@ -300,6 +300,25 @@ def apply_softsonic_force_field(
     robot: _Articulation = env.scene[asset_cfg.name]
     command = env.command_manager.get_term(command_name)
     motion_lib = command.motion_lib
+
+    import math
+    if not all(math.isfinite(value) and value >= 0 for value in (max_force, max_torque)):
+        raise ValueError("SoftSONIC max_force/max_torque must be finite and nonnegative")
+    if not hasattr(robot, "set_softsonic_world_wrench"):
+        raise RuntimeError("SoftSONIC force fields require SoftSONICArticulation (physical-step wrench hold)")
+
+    if not getattr(motion_lib, "has_softsonic", True):
+        # Fail closed on a library swap: never retain a previous held wrench.
+        # No-force evaluation must supply the explicit zero-field schema.
+        zero = torch.zeros(env.num_envs, robot.num_bodies, 3, device=env.device)
+        robot.set_softsonic_world_wrench(zero, zero)
+        for name in ("_softsonic_force_actual", "_softsonic_torque_actual",
+                     "_softsonic_force_desired", "_softsonic_torque_desired",
+                     "_softsonic_k_ff", "_softsonic_last_k_ff", "_softsonic_active"):
+            value = getattr(env, name, None)
+            if value is not None:
+                value.zero_()
+        raise RuntimeError("SoftSONIC force-field event requires metadata; use explicit zero-field data for no-force")
 
     # 规范索引 -> 本资产的 body 索引，只解析一次。该索引同时用于
     # robot.data.body_pos_w 与 motion_lib 的 *_full 缓冲 —— 后者的文档写明是
@@ -339,7 +358,7 @@ def apply_softsonic_force_field(
     delta_p = ss[:, sl["ff_setpoint_delta_pos"]]
     delta_rv = ss[:, sl["ff_setpoint_delta_rotvec"]]
     canon = ss[:, sl["force_body_id"]].squeeze(-1).long()
-    active = k_ff > 0.0
+    active = (k_ff > 0.0) | (k_ff_rot > 0.0)
 
     forces = torch.zeros(env.num_envs, robot.num_bodies, 3, device=env.device)
     torques = torch.zeros_like(forces)
@@ -393,7 +412,17 @@ def apply_softsonic_force_field(
         )
         ref_root_quat = motion_lib.get_body_quat_w_full(command.motion_ids, steps)[:, 0]
 
-    rising = (last_k < _ANCHOR_K_EPS) & (k_ff >= _ANCHOR_K_EPS)
+    field_strength = torch.maximum(k_ff, k_ff_rot)
+    rising = (last_k < _ANCHOR_K_EPS) & (field_strength >= _ANCHOR_K_EPS)
+    # A contiguous body/motion change starts a new interaction even
+    # without a sampled zero-stiffness frame. Do not reuse another body's anchor.
+    previous_body = getattr(env, "_softsonic_last_canon", None)
+    if previous_body is not None:
+        changed = ((canon != previous_body)
+                   | (command.motion_ids != env._softsonic_last_motion_ids))
+        rising |= active & changed
+    env._softsonic_last_canon = canon.clone()
+    env._softsonic_last_motion_ids = command.motion_ids.clone()
     if rising.any():
         ids = rising.nonzero(as_tuple=False).squeeze(-1)
         _, _, yaw_now = euler_xyz_from_quat(robot.data.root_quat_w[ids])
@@ -403,7 +432,7 @@ def apply_softsonic_force_field(
         env._softsonic_ff_anchor_rot[ids] = quat_from_euler_xyz(zeros, zeros, d_yaw)  # noqa: SLF001
         env._softsonic_ff_anchor_pos[ids] = robot.data.root_pos_w[ids]  # noqa: SLF001
         env._softsonic_ff_anchor_ref_pos[ids] = ref_root_pos[ids]  # noqa: SLF001
-    env._softsonic_last_k_ff = k_ff.clone()  # noqa: SLF001
+    env._softsonic_last_k_ff = field_strength.clone()  # noqa: SLF001
 
     if active.any():
         rows = active.nonzero(as_tuple=False).squeeze(-1)
@@ -448,8 +477,8 @@ def apply_softsonic_force_field(
         )
 
         # 夹幅值，防止机器人被推飞后力发散
-        f = f * (max_force / torch.linalg.norm(f, dim=-1, keepdim=True).clamp(min=max_force))
-        t = t * (max_torque / torch.linalg.norm(t, dim=-1, keepdim=True).clamp(min=max_torque))
+        f = f * (max_force / torch.linalg.norm(f, dim=-1, keepdim=True).clamp(min=1e-12)).clamp(max=1.0)
+        t = t * (max_torque / torch.linalg.norm(t, dim=-1, keepdim=True).clamp(min=1e-12)).clamp(max=1.0)
 
         forces[rows, cols] = f
         torques[rows, cols] = t
@@ -478,7 +507,8 @@ def apply_softsonic_force_field(
     # **均值 4.96**。拿均值形式的 force_ratio 去比中位常数会得出"比刚性还差"的
     # 错误结论。
     #
-    # 推导：数据满足 dp = F/k_ff + F/k_robot（已用 MuJoCo 交叉验证，自洽误差 0.00%），
+    # 推导：已校验的 forcefield 数据满足 dp = F/k_ff + F/k_robot；旧数据的
+    # 5 个回滚残留行违反此契约，必须在转换/独立修订阶段处理（N1）。
     # 两边乘 k_ff/F 即得
     #     k_ff·dp/F = 1 + k_ff/k_robot = 刚性极限
     # 于是完全不需要知道 k_robot，三个字段直接给出该帧的刚性参考值。
@@ -516,10 +546,10 @@ def apply_softsonic_force_field(
         fb[rows] = cols
     env._softsonic_active_force_body = fb  # noqa: SLF001
 
-    # 外力缓冲是持久的，必须每步重写全部环境，否则无力环境残留上一帧
-    robot.permanent_wrench_composer.set_forces_and_torques(
-        forces=forces, torques=torques, body_ids=None, env_ids=None, is_global=True
-    )
+    # B1: hold WORLD vectors over this control interval; the project articulation
+    # converts and submits them before EVERY physics substep (including decimation
+    # >1). Never pass world vectors through a persistent cached link conversion.
+    robot.set_softsonic_world_wrench(forces, torques)
 
     if debug_print_every_n_steps:
         counter = getattr(env, "_softsonic_wrench_step", 0) + 1
