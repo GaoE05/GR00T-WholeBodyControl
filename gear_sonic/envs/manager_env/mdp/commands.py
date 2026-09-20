@@ -2538,6 +2538,9 @@ class TrackingCommand(CommandTerm):
             self.metrics["error_joint_pos"] = torch.abs(self.joint_pos - self.robot_joint_pos).mean(
                 dim=-1
             )
+            self.metrics["error_joint_vel"] = torch.abs(self.joint_vel - self.robot_joint_vel).mean(
+                dim=-1
+            )
         # SoftSONIC：对 q_aug 的跟踪误差。无 aug 数据时保持为 0。
         if self.motion_lib.has_aug_pose:
             steps = self.motion_start_time_steps + self.time_steps
@@ -2551,9 +2554,6 @@ class TrackingCommand(CommandTerm):
             self.metrics["error_body_pos_aug"] = torch.norm(
                 self.body_pos_w_aug - self.robot_body_pos_w, dim=-1
             ).mean(dim=-1)
-            self.metrics["error_joint_vel"] = torch.abs(self.joint_vel - self.robot_joint_vel).mean(
-                dim=-1
-            )
 
     def resample_all_commands(self):
         """Resample motion clips and reset state for all environments at once."""
