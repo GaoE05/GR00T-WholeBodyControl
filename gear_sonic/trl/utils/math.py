@@ -39,19 +39,25 @@ def slerp(q0, q1, t):
     neg_mask_expanded = neg_mask.unsqueeze(-1).expand_as(q1)
     q1 = torch.where(neg_mask_expanded, -q1, q1)
 
-    cos_half_theta = torch.abs(cos_half_theta)
-    cos_half_theta = torch.unsqueeze(cos_half_theta, dim=-1)
+    # Unit quaternion dots can round just outside [-1, 1]. Keep acos finite.
+    cos_half_theta = torch.abs(cos_half_theta).clamp(0.0, 1.0).unsqueeze(-1)
+    small = torch.sqrt((1.0 - cos_half_theta * cos_half_theta).clamp(min=0.0)) < 0.001
 
-    half_theta = torch.acos(cos_half_theta)
-    sin_half_theta = torch.sqrt(1.0 - cos_half_theta * cos_half_theta)
-
-    ratioA = torch.sin((1 - t[:, None]) * half_theta) / sin_half_theta
-    ratioB = torch.sin(t[:, None] * half_theta) / sin_half_theta
-
+    # Do not evaluate singular acos/division branches at coincident inputs:
+    # torch.where alone masks forward NaNs but can still leave NaN gradients.
+    safe_cos = torch.where(small, torch.zeros_like(cos_half_theta), cos_half_theta)
+    half_theta = torch.acos(safe_cos)
+    sin_half_theta = torch.sqrt(1.0 - safe_cos * safe_cos)
+    blend = t[:, None]
+    ratioA = torch.sin((1 - blend) * half_theta) / sin_half_theta
+    ratioB = torch.sin(blend * half_theta) / sin_half_theta
     new_q = ratioA * q0 + ratioB * q1
 
-    new_q = torch.where(torch.abs(sin_half_theta) < 0.001, 0.5 * q0 + 0.5 * q1, new_q)
-    new_q = torch.where(torch.abs(cos_half_theta) >= 1, q0, new_q)
+    # Near coincidence use normalized lerp with the actual interpolation time.
+    # In particular, a dot rounded to 1 must not discard a nonzero endpoint delta.
+    linear = (1 - blend) * q0 + blend * q1
+    linear = linear / torch.norm(linear, p=2, dim=-1, keepdim=True).clamp(min=1e-12)
+    new_q = torch.where(small, linear, new_q)
 
     return new_q
 
