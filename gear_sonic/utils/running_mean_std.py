@@ -11,6 +11,14 @@ This can help reduce memory fragmentation.
 
 
 class RunningMeanStd(nn.Module):
+    """Merge population moments; version 2 uses correction=0 batch variance.
+
+    The state_dict metadata records this update definition. Loading old buffers
+    preserves them exactly; their past sample-variance updates cannot be undone.
+    Frozen inference therefore retains the checkpoint's original behavior.
+    """
+
+    _version = 2
 
     def __init__(self, insize, epsilon=1e-05, per_channel=False, norm_only=False):
         super().__init__()
@@ -128,7 +136,10 @@ class RunningMeanStd(nn.Module):
         # update After normalization, so that the values used for training and testing are the same.
         if self.training and not self.frozen:
             mean = input.mean(self.axis)  # along channel axis
-            var = input.var(self.axis)
+            # The parallel-moment merge below consumes population variance.
+            # Sample variance is undefined for a singleton and makes subsequent
+            # inference NaN even though this call used the previous finite stats.
+            var = input.var(self.axis, correction=0)
 
             new_mean, new_var, new_count = self._update_mean_var_count_from_moments(
                 self.running_mean, self.running_var, self.count, mean, var, input.size()[0]
