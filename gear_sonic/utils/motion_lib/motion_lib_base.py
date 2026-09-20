@@ -7,6 +7,7 @@ from pathlib import Path
 import random
 import re
 import resource
+import sys
 
 import easydict
 import joblib
@@ -1493,26 +1494,32 @@ class MotionLibBase:
                 for i in range(0, len(jobs), chunk)
             ]
 
-            job_args = [jobs[i] for i in range(len(jobs))]
-            for i in range(1, len(jobs)):
-                worker_args = (*job_args[i], queue, i)
-                worker = mp.Process(target=self.load_motion_with_skeleton, args=worker_args)
-                worker.start()
-                workers.append(worker)
-            res_acc.update(self.load_motion_with_skeleton(*jobs[0], None, 0))
+            try:
+                job_args = [jobs[i] for i in range(len(jobs))]
+                for i in range(1, len(jobs)):
+                    worker_args = (*job_args[i], queue, i)
+                    worker = mp.Process(target=self.load_motion_with_skeleton, args=worker_args)
+                    worker.start()
+                    workers.append(worker)
+                res_acc.update(self.load_motion_with_skeleton(*jobs[0], None, 0))
 
-            for i in progress.track(range(len(jobs) - 1), "Gathering results..."):  # noqa: B007
-                res = get_worker_result(queue, workers)
-                res_acc.update(res)
+                for i in progress.track(range(len(jobs) - 1), "Gathering results..."):  # noqa: B007
+                    res = get_worker_result(queue, workers)
+                    res_acc.update(res)
 
-            nav_indices = []
-            other_indices = list(range(len(motions)))
-
-            # Wait for all workers to complete and clean them up
-            for worker in workers:
-                worker.join()
-                worker.close()
-            workers = []
+                nav_indices = []
+                other_indices = list(range(len(motions)))
+            finally:
+                # N2: a parent FK error or a failed child must not orphan the
+                # remaining workers. Successful workers are joined normally.
+                if sys.exc_info()[0] is not None:
+                    for worker in workers:
+                        if worker.is_alive():
+                            worker.terminate()
+                for worker in workers:
+                    worker.join()
+                    worker.close()
+                workers = []
 
         for f in progress.track(range(len(res_acc)), description="Processing motions..."):
             motion_file_data, curr_motion = res_acc[f]
