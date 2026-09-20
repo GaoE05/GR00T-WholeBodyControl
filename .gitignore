@@ -219,3 +219,6 @@ models/
 # Downloaded from HuggingFace (hf download)
 sample_data/
 sonic_release/
+
+# External frozen ATM assets may be a directory or a worktree-local symlink.
+/sonic_release
