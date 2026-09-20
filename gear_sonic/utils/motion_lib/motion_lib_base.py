@@ -20,6 +20,7 @@ import torch.multiprocessing as mp
 from gear_sonic.isaac_utils import rotations
 from gear_sonic.trl.utils import common
 from gear_sonic.utils.motion_lib import skeleton
+from gear_sonic.utils.motion_lib.softsonic_contract import inspect_motion_batch, get_worker_result
 
 
 class FixHeightMode(enum.Enum):
@@ -62,12 +63,12 @@ class FixHeightMode(enum.Enum):
 #   1. 奖励项比较的是**连杆位置**而非关节角，FK 这一步无论如何要做，且必须在加载时
 #      做一次 —— 4096 环境每步做 FK 太浪费。
 #   2. fk_batch 自带 30->50Hz 插值（含四元数正确处理），比对 q_aug 做最近邻好。
-# 外力则相反：它是分段常量，最近邻才是正确的，所以留在本字段里。
+# 场元数据使用同一 FK 时间网格的最近邻取样；事件内连续量的插值仍待单独验证。
 #
 # 陷阱：[42:43] >= 0 **不代表该帧真的在施力**。CMA 存的 link_id 取自
 # `current_event if current_event else event_queue[0]`（runner.py:405-407），
 # 也就是包含尚未开始的排队事件 —— 实测 99% 的帧 id >= 0，但只有 66% 的帧 |F| > 1N。
-# **判断是否在施力一律用 ‖ext_force‖，不要用 body id。**
+# 场是否存在由平移/旋转刚度定义；另验元数据有效性，不能只用力幅值删零目标弹簧。
 #
 # 刻意不存 body id：CMA 的 id 来自 SoftMimic 的 MJCF，而训练时在 Isaac Lab 里用的是
 # SONIC 自己的 G1 资产，两者 body 索引不同。存规范索引，运行时各自查名字。
@@ -1275,6 +1276,12 @@ class MotionLibBase:
         logger.info(f"Current motion keys: {self.curr_motion_keys[:10]}, ....")
 
         motion_data_list = self._motion_data_list[sample_idxes.cpu().numpy()]
+        # B9/N2: establish capabilities in the parent, before any FK worker.
+        # Zero-wrench samples must use the same schema as augmented samples.
+        # Recompute on every load so a previous augmented batch cannot leak state.
+        self.has_aug_pose, self.has_softsonic = inspect_motion_batch(
+            motion_data_list, self.m_cfg, is_evaluation, joblib.load
+        )
         if self.smpl_data is not None:
             smpl_data_list = [self.smpl_data[idx] for idx in sample_idxes.cpu().numpy()]
         else:
@@ -1495,7 +1502,7 @@ class MotionLibBase:
             res_acc.update(self.load_motion_with_skeleton(*jobs[0], None, 0))
 
             for i in progress.track(range(len(jobs) - 1), "Gathering results..."):  # noqa: B007
-                res = queue.get()
+                res = get_worker_result(queue, workers)
                 res_acc.update(res)
 
             nav_indices = []
@@ -2003,21 +2010,9 @@ class MotionLibBase:
             # import ipdb; ipdb.set_trace()
             if "action" in curr_file.keys():  # noqa: SIM118
                 self.has_action = True
-            if SOFTSONIC_AUG_POSE_FIELD in curr_file.keys():  # noqa: SIM118
-                if not self.has_aug_pose:
-                    logger.info(
-                        f"SoftSONIC: 检测到 '{SOFTSONIC_AUG_POSE_FIELD}'，将对柔顺目标 "
-                        "q_aug 额外跑一次 fk_batch"
-                    )
-                self.has_aug_pose = True
-            if SOFTSONIC_FIELD in curr_file.keys():  # noqa: SIM118
-                if not self.has_softsonic:
-                    logger.info(
-                        f"SoftSONIC: 检测到 '{SOFTSONIC_FIELD}' 逐帧字段 "
-                        f"(shape {tuple(curr_file[SOFTSONIC_FIELD].shape)})，"
-                        "柔顺目标与回放外力可用"
-                    )
-                self.has_softsonic = True
+            schema = (SOFTSONIC_AUG_POSE_FIELD in curr_file, SOFTSONIC_FIELD in curr_file)
+            if schema != (self.has_aug_pose, self.has_softsonic):
+                raise ValueError("Motion schema changed after parent validation")
 
             if "fps" not in curr_file.keys():  # noqa: SIM118
                 curr_file["fps"] = 30.0
