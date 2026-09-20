@@ -3099,20 +3099,13 @@ class TrackingCommand(CommandTerm):
         root_lin_vel = self.body_lin_vel_w[:, 0].clone()
         root_ang_vel = self.body_ang_vel_w[:, 0].clone()
 
-        # ── SoftSONIC：从柔顺目标 q_aug 初始化（根位姿 + 根速度 + 关节角/速度）──
-        # 为什么默认从 q_aug 而不是 q_ref：
-        #   1. 无外力时 q_aug 严格等于 q_ref（实测关节偏差中位 0.000°），所以这是
-        #      q_ref 初始化的严格推广，约 30% 的帧上两者相同。
-        #   2. 事件中途从 q_ref 初始化是**物理上不自洽**的：力已在峰值而机器人却在
-        #      未退让的位姿，力场会立刻施加 F·(1+k_ff/k_robot) ≈ 3 倍的力，这个剧烈
-        #      瞬态在目标行为里根本不存在。q_aug(t) 才是"一直在柔顺退让的机器人此刻
-        #      该在的位姿"，与该帧的力自洽。
-        #   3. RSI 的本意是从**目标**状态分布采样，而我们的目标轨迹就是 q_aug。
-        # 退让瞬态不会因此练不到：episode 10 秒 / 500 步，事件时长 2~4 秒、间隔
-        # 0.5~1.5 秒，每个 episode 都含多次完整的施力起始；RSI 只影响第 0 帧。
-        #
-        # 四个量必须一起换。只换关节角会留下不自洽的根位姿 —— q_aug 的骨盆相对
-        # q_ref 中位移动 10.5cm、p90 达 26.4cm，不是可以忽略的量。
+        # SoftSONIC reset policy: default A initializes the original q_ref.
+        # Optional B uses all q_aug root/joint positions AND velocities, following
+        # SoftMimic adapted RSI. Neither arbitrary-phase policy guarantees a
+        # complete force onset: events may already be active and episodes may end.
+        # Release frames can have zero external wrench while q_aug != q_ref.
+        # The event anchor root follows this switch (B5); a common event-before-
+        # onset protocol is needed to compare learned response independently of RSI.
         compliant_joint_pos = None
         compliant_joint_vel = None
         if getattr(self.cfg, "reset_from_compliant_target", False):
