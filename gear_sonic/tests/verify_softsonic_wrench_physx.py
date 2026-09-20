@@ -63,18 +63,30 @@ context = {}
 class PhysXSubmissionSpy:
     def __init__(self, original):
         self.original = original
+        self.previous_key = None
+        self.previous_quat = None
 
     def __getattr__(self, name):
         return getattr(self.original, name)
 
     def apply_forces_and_torques_at_position(self, **kw):
         assert kw['is_global'] is False
-        q = robot.data.body_link_quat_w
+        # Independent PhysX read: do not validate a stale ArticulationData cache
+        # against itself. PhysX exposes xyzw whereas IsaacLab math uses wxyz.
+        q_xyzw = self.original.get_link_transforms()[..., 3:7]
+        q = q_xyzw[..., [3, 0, 1, 2]]
+        key = (context['decimation'], context['control_step'])
+        hold_rotation = 0.0
+        if key == self.previous_key:
+            dot = (q * self.previous_quat).sum(-1).abs().clamp(max=1.0)
+            hold_rotation = (2 * torch.acos(dot)).max().item()
+        self.previous_key, self.previous_quat = key, q.clone()
         f = quat_apply(q, kw['force_data'].reshape(n, b, 3))
         t = quat_apply(q, kw['torque_data'].reshape(n, b, 3))
         ferr = (f-force).norm(dim=-1).max().item()
         terr = (t-torque).norm(dim=-1).max().item()
-        records.append(dict(context, max_force_vector_error_N=ferr,
+        records.append(dict(context, within_hold_link_rotation_rad=hold_rotation,
+                            max_force_vector_error_N=ferr,
                             max_torque_vector_error_Nm=terr,
                             submitted_force_norm_N=f.norm(dim=-1).max().item()))
         assert ferr < 1e-4 and terr < 1e-5, records[-1]
@@ -116,6 +128,8 @@ try:
                 scene.update(.005)
                 assert robot.instantaneous_wrench_composer.composed_force_as_torch.count_nonzero() == 0
     assert len(records) == 40, len(records)
+    assert any(r['decimation'] == 4 and r['within_hold_link_rotation_rad'] > 1e-5
+               for r in records), 'test did not rotate a link within a held wrench interval'
     result = {'status': 'PASS', 'num_envs': n, 'physics_steps': len(records),
               'max_force_vector_error_N': max(r['max_force_vector_error_N'] for r in records),
               'max_torque_vector_error_Nm': max(r['max_torque_vector_error_Nm'] for r in records),
