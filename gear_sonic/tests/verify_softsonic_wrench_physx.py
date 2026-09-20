@@ -11,6 +11,7 @@ is a force transport acceptance, not a policy/forcefield performance benchmark.
 """
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -137,5 +138,17 @@ try:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps({k:v for k,v in result.items() if k != 'records'}))
-finally:
-    app.close()
+except BaseException:
+    # Isaac Sim teardown can hang after both successful and failed probes.
+    # Preserve a nonzero exit and traceback for EVERY assertion/runtime failure.
+    import traceback
+    traceback.print_exc()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(1)
+else:
+    # Match SONIC eval_agent_trl.py's process-exit convention. All physical
+    # assertions and proof writes above must complete before reaching this path.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
