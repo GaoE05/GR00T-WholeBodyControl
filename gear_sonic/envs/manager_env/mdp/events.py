@@ -371,11 +371,27 @@ def apply_softsonic_force_field(
     # episode_length <= 1 here would re-anchor on BOTH internal-reset step 0
     # and step 1, moving the field with the first physical response (review B5).
 
-    ref_root_pos = (
-        motion_lib.get_body_pos_w_full(command.motion_ids, steps)[:, 0]
-        + env.scene.env_origins
-    )
-    ref_root_quat = motion_lib.get_body_quat_w_full(command.motion_ids, steps)[:, 0]
+    # SoftMimic compliance_augmented_reference_command.py:381-393 anchors to
+    # the adapted root because its reset itself starts from the adapted state.
+    # Match that principle, not an unconditional adapted-root choice: our main
+    # configuration resets to q_ref. Using q_aug there would move the field by
+    # the q_ref/q_aug root difference and introduce a new reset inconsistency.
+    # Thus q_aug reset uses q_aug anchors; q_ref reset retains its original
+    # geometry. This choice applies consistently to each interaction rising edge.
+    if getattr(command.cfg, "reset_from_compliant_target", False):
+        if not motion_lib.has_aug_pose:
+            raise RuntimeError("q_aug force-field anchoring requires augmented poses")
+        ref_root_pos = (
+            motion_lib.get_body_pos_w_aug_full(command.motion_ids, steps)[:, 0]
+            + env.scene.env_origins
+        )
+        ref_root_quat = motion_lib.get_body_quat_w_aug_full(command.motion_ids, steps)[:, 0]
+    else:
+        ref_root_pos = (
+            motion_lib.get_body_pos_w_full(command.motion_ids, steps)[:, 0]
+            + env.scene.env_origins
+        )
+        ref_root_quat = motion_lib.get_body_quat_w_full(command.motion_ids, steps)[:, 0]
 
     rising = (last_k < _ANCHOR_K_EPS) & (k_ff >= _ANCHOR_K_EPS)
     if rising.any():
