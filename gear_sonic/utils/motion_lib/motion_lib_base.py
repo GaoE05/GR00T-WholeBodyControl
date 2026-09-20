@@ -692,18 +692,34 @@ class MotionLibBase:
 
     def get_dof_pos_aug(self, motion_ids, motion_steps):
         """取柔顺目标 q_aug 的关节角（IsaacLab 顺序），供从 q_aug 初始化的 reset 使用。"""
+        # A plain-data reload changes capabilities before replacing motion buffers.
+        # Never expose an augmented tensor retained from the previous batch.
+        if not self.has_aug_pose:
+            return self.get_dof_pos(motion_ids, motion_steps)
         return self.dof_pos_aug[motion_steps + self.length_starts[motion_ids]]
 
     def get_dof_vel_aug(self, motion_ids, motion_steps):
         """取柔顺目标 q_aug 的关节速度（IsaacLab 顺序）。"""
+        # A plain-data reload changes capabilities before replacing motion buffers.
+        # Never expose an augmented tensor retained from the previous batch.
+        if not self.has_aug_pose:
+            return self.get_dof_vel(motion_ids, motion_steps)
         return self.dof_vel_aug[motion_steps + self.length_starts[motion_ids]]
 
     def get_body_lin_vel_w_aug(self, motion_ids, motion_steps):
         """取柔顺目标 q_aug 的连杆线速度（与 get_body_lin_vel_w 平行）。"""
+        # A plain-data reload changes capabilities before replacing motion buffers.
+        # Never expose an augmented tensor retained from the previous batch.
+        if not self.has_aug_pose:
+            return self.get_body_lin_vel_w(motion_ids, motion_steps)
         return self.body_lin_vel_w_aug[motion_steps + self.length_starts[motion_ids]]
 
     def get_body_ang_vel_w_aug(self, motion_ids, motion_steps):
         """取柔顺目标 q_aug 的连杆角速度。"""
+        # A plain-data reload changes capabilities before replacing motion buffers.
+        # Never expose an augmented tensor retained from the previous batch.
+        if not self.has_aug_pose:
+            return self.get_body_ang_vel_w(motion_ids, motion_steps)
         return self.body_ang_vel_w_aug[motion_steps + self.length_starts[motion_ids]]
 
     def get_time_step_total(self, motion_ids):

@@ -68,6 +68,42 @@ class Diagnostics(unittest.TestCase):
                 with self.assertRaises(OSError): ns['dump'](obj,{'token':torch.ones(1,1)})
                 self.assertFalse(getattr(obj,'_softsonic_atm_obs_dumped',False))
 
+    def test_plain_reload_getters_cannot_read_previous_aug_batch(self):
+        import joblib
+        import numpy as np
+        src=(ROOT/'gear_sonic/utils/motion_lib/motion_lib_base.py').read_text()
+        tree=ast.parse(src)
+        original=next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name=='MotionLibBase')
+        pairs=[('dof_pos_aug','dof_pos'),('dof_vel_aug','dof_vel'),
+               ('body_lin_vel_w_aug','body_lin_vel_w'),('body_ang_vel_w_aug','body_ang_vel_w')]
+        names={'get_'+name for pair in pairs for name in pair}
+        methods=[n for n in original.body if isinstance(n,ast.FunctionDef) and n.name in names]
+        cls=ast.ClassDef(name='MotionAccessors',bases=[],keywords=[],body=methods,decorator_list=[])
+        namespace={}
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[cls],type_ignores=[])),'production_getters','exec'),namespace)
+        obj=namespace['MotionAccessors']();obj.m_cfg={};obj.length_starts=torch.tensor([0,2])
+        obj.has_aug_pose=True;obj.has_softsonic=True
+        for aug,ref in pairs:
+            setattr(obj,aug,torch.full((5,2),777.))
+            setattr(obj,ref,torch.arange(10.).reshape(5,2))
+        contract={}
+        exec(compile((ROOT/'gear_sonic/utils/motion_lib/softsonic_contract.py').read_text(),'production_contract','exec'),contract)
+        assignments=[n for n in ast.walk(tree) if isinstance(n,ast.Assign) and 'inspect_motion_batch(' in ast.unparse(n)]
+        self.assertEqual(len(assignments),1)
+        parent=compile(ast.Module(body=assignments,type_ignores=[]),'production_capability_assignment','exec')
+        plain=dict(pose_aa=np.zeros((3,30,3)),root_trans_offset=np.zeros((3,3)),fps=30.)
+        augmented=dict(**plain,pose_aa_aug=plain['pose_aa'].copy(),root_trans_aug=plain['root_trans_offset'].copy(),softsonic=np.zeros((3,15)))
+        ids=torch.tensor([1]);steps=torch.tensor([1])
+        scope=dict(self=obj,inspect_motion_batch=contract['inspect_motion_batch'],joblib=joblib,is_evaluation=False)
+        for record,want_aug in [(augmented,True),(plain,False),(augmented,True)]:
+            scope['motion_data_list']=[record]
+            exec(parent,scope)
+            self.assertEqual(obj.has_aug_pose,want_aug)
+            for aug,ref in pairs:
+                actual=getattr(obj,'get_'+aug)(ids,steps)
+                expected=getattr(obj,aug if want_aug else ref)[[3]]
+                torch.testing.assert_close(actual,expected)
+
     def test_progress_thresholds_empty_sets_and_historical_mean(self):
         src=(ROOT/'gear_sonic/envs/manager_env/mdp/rewards.py').read_text()
         fn=next(n for n in ast.parse(src).body if isinstance(n,ast.FunctionDef) and n.name=='softsonic_compliance_progress')
