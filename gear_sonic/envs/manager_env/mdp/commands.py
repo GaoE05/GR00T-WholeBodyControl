@@ -3212,6 +3212,13 @@ class TrackingCommand(CommandTerm):
             ),
             env_ids=env_ids,
         )
+        # Invalidate this episode's field anchor exactly once at the real reset.
+        # SoftMimic compliance_augmented_reference_command.py:205-229 clears
+        # its previous stiffness here too. Before the first field call no buffer
+        # exists; the event initializes it to zero. Also covers motion resamples.
+        if hasattr(self._env, "_softsonic_last_k_ff"):
+            self._env._softsonic_last_k_ff[env_ids] = 0.0  # noqa: SLF001
+
         # Handle object positioning
         if self._multi_object_mode and len(self._object_names) > 0:
             # MULTI-OBJECT MODE: Position active object, move others far away

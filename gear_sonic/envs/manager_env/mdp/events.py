@@ -366,10 +366,10 @@ def apply_softsonic_force_field(
         env._softsonic_ff_anchor_rot = torch.zeros(env.num_envs, 4, device=env.device)  # noqa: SLF001
         env._softsonic_ff_anchor_rot[:, 0] = 1.0  # noqa: SLF001  单位四元数
 
-    # episode 刚 reset 的环境必须重新锚定，否则会沿用上一条 episode 的锚点。
-    # 对应 SoftMimic 在 reset()/reset_motions() 里把 _last_ff_stiffness 清零。
-    just_reset = env.episode_length_buf <= 1
-    last_k = torch.where(just_reset, torch.zeros_like(last_k), last_k)
+    # TrackingCommand clears the previous stiffness when it actually resets a
+    # robot, matching SoftMimic reset/reset_motions (lines 205-229). Testing
+    # episode_length <= 1 here would re-anchor on BOTH internal-reset step 0
+    # and step 1, moving the field with the first physical response (review B5).
 
     ref_root_pos = (
         motion_lib.get_body_pos_w_full(command.motion_ids, steps)[:, 0]
