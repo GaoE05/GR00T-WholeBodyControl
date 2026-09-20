@@ -74,6 +74,9 @@ def inspect_motion_batch(records, cfg, is_evaluation, load_file):
                              "construct zero-wrench entries with q_aug=q_ref and zero metadata")
     if expected is None:
         raise ValueError("Cannot load an empty motion batch")
+    # This SONIC transform runs even during evaluation, but only shifts q_ref.
+    if any(expected) and cfg.get("zero_root_xy", False):
+        raise ValueError("SoftSONIC zero_root_xy would shift q_ref without q_aug/field")
     if any(expected) and not is_evaluation:
         incompatible = [name for name in ("freeze_frame_aug", "randomize_heading",
                         "randomize_wrist_poses", "cat_upper_body_poses",

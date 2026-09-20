@@ -31,6 +31,14 @@ aug = dict(**plain, pose_aa_aug=plain['pose_aa'].copy(),
            root_trans_aug=plain['root_trans_offset'].copy(), softsonic=np.zeros((3, 15)))
 assert inspect([plain]) == (False, False)
 assert inspect([aug, aug]) == (True, True)
+rejects([aug], "zero_root_xy", {"zero_root_xy": True})
+try:
+    inspect([aug], {"zero_root_xy": True}, True)
+except ValueError as error:
+    assert "zero_root_xy" in str(error)
+else:
+    raise AssertionError('Evaluation must also reject zero_root_xy')
+assert inspect([plain], {"zero_root_xy": True}, True) == (False, False)
 for records in ([plain, aug], [aug, plain]):
     rejects(records, "mixed SoftSONIC schema")
 for name in ("freeze_frame_aug", "randomize_heading", "randomize_wrist_poses", "cat_upper_body_poses"):
