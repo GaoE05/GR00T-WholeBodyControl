@@ -98,7 +98,8 @@ def forcefield_fixture():
     robot = NS(num_bodies=n, body_names=mlb.SOFTSONIC_FORCE_BODIES,
                data=NS(root_pos_w=ref_pos[:, 0].clone(), root_quat_w=quat().float(),
                        body_pos_w=ref_pos.clone(), body_quat_w=ref_quat.clone()),
-               permanent_wrench_composer=NS(set_forces_and_torques=lambda **kwargs: captured.update(kwargs)))
+               permanent_wrench_composer=NS(set_forces_and_torques=lambda **kwargs: captured.update(kwargs)),
+               set_softsonic_world_wrench=lambda forces, torques: captured.update(forces=forces, torques=torques))
 
     class Scene(dict):
         env_origins = torch.zeros(1, 3)
