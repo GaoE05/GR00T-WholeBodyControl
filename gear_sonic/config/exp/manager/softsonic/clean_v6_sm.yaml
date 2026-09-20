@@ -1,6 +1,6 @@
 # @package _global_
 # =============================================================================
-# clean_v6_sm = clean_v5 + 把**训练侧**全面对齐 SoftMimic（而非 SONIC）
+# clean_v6_sm：借鉴 SoftMimic 的部分训练设置，保留 SONIC 基座与项目任务定义
 # =============================================================================
 # 背景：clean_v5 的设计原则是"最大化复用 SONIC"，结果 17 项算法超参里 15 项与
 # sonic_release 完全一致、观测组逐项一致。实验 p1/p2 两个种子跑到 3000+ 迭代，
@@ -68,9 +68,10 @@ manager_env:
     latent_residual_scale: 0.15
     latent_residual_clip: 0.5
     action_clip_value: 3.0
-    # ── 改动 8：episode 长度 10 -> 30 s（SoftMimic env.yaml: episode_length_s 30.0）──
-    # 站立柔顺的力事件是稀疏的，10 s 的 episode 里只能遇到少数几次外力；
-    # 30 s 让每条轨迹包含约 3 倍的力事件，回报的信噪比随之提高。
+    # Historical nominal length and Episode_Reward normalization denominator.
+    # This termination group ends at motion-end; it does NOT enforce 30 seconds.
+    # A 30s evaluation horizon is administrative censoring in the independent
+    # evaluator. Do not interpret 10->30 here as tripling force-event exposure.
     episode_length_s: 30.0
   commands:
     motion:

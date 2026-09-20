@@ -56,15 +56,11 @@ manager_env:
       num_future_frames: 10
       dt_future_ref_frames: 0.1
       encoder_sample_probs: { g1: 1.0, teleop: 0.0, smpl: 0.0 }
-      # reset 不设 reset_from_compliant_target，即走 SONIC 原生：reset 到主 motion
-      # (q_ref)。这与奖励/终止的目标 q_aug 不同，但**是自洽的且是刻意的**：
-      #   1. ATM 跟踪的就是 q_ref，把机器人放在 q_ref 上才与冻结底座一致；放到
-      #      q_aug 上 ATM 会立刻往回拉，制造一个人为瞬态（实测早期 reward 反而更低）。
-      #   2. 这才是部署时的真实条件 —— 机器人正常跟踪，外力到来，它要让开。
-      #      每次 reset 都提供一次"从刚性起步、必须让开"的完整学习信号。
-      #   3. 开局误差（骨盆位移 k450 中位 6.3 cm / p90 19.3 cm）远小于放宽后的
-      #      0.30 终止阈值，不会被立刻杀掉。
-      #   4. 不需要任何补丁，是原生行为。
+      # A: initialize q_ref at an arbitrary sampled phase. Mid-event starts
+      # introduce a recovery transient; they do not model a complete zero-force
+      # onset. Keep this historical training choice for controlled comparisons.
+      # B initializes q_aug; compare A/B on a shared event-before-onset protocol.
+      # Preflight must check full pose/velocity demand under the actual reset.
       motion_lib_cfg:
         motion_file: /mnt/data/temp_user/yi.gao/outputs/cma/motionlib/dual_k450
         smpl_motion_file: "zeros"
