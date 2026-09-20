@@ -850,18 +850,20 @@ def _force_link_anchored_target(env, command_name: str, want_quat: bool = False)
 
 
 def softsonic_compliance_progress(env, command_name: str = "motion"):
-    """**主评价指标**：受力连杆的归一化柔顺完成度。返回 ``(值, 有效掩码)``。
+    """**主评价指标**：受力连杆的归一化柔顺完成度。返回 ``(progress, demand_m)``。
+
+    两个一维张量均已筛到力场活跃且需求 >1 cm 的环境；无有效样本返回 ``(None, None)``。
 
         progress = 1 - ‖p_robot - p_aug‖ / ‖p_ref - p_aug‖
 
       0  = 机器人停在刚性参考 p_ref（完全不柔顺）
       1  = 精确到达柔顺目标 p_aug
-      <0 = 比不柔顺还差（被推到了 p_aug 的反方向）
+      <0 = 到 p_aug 的距离大于柔顺需求；不意味着反向位移或反向速度
 
     为什么需要它（三条都是踩过的坑）：
 
-    1. **与数据集量级无关。** 分母是该帧"从刚性到柔顺要走多远"，所以 d25/d45/d1545
-       这些柔顺幅度不同的数据集之间可以直接比。此前用"受力连杆误差(cm)"做判据，
+    1. **按本帧柔顺需求归一化。** 分母是该帧"从刚性到柔顺要走多远"；小分母会
+       放大跟踪误差，跨数据集仍须控制分布并报告各自 frozen 基线。此前用"受力连杆误差(cm)"做判据，
        换数据集后参照系变了却拿旧基线比，导致过误判（把 5.96cm 误判为劣于 4.38cm，
        而该数据集的 frozen 基线其实是 6.03cm）。
     2. **不被跟踪噪声稀释。** 只看受力连杆那一个点，而不是 29 个关节取平均 ——
@@ -869,7 +871,7 @@ def softsonic_compliance_progress(env, command_name: str = "motion"):
        纹丝不动，证明它测不出柔顺。
     3. **不需要从奖励反解。** 此前只能用 exp(-e²/σ²) 反推 e，既间接又依赖归一化基准。
 
-    只在力场活跃的帧上有效（掩码），无力帧没有"柔顺"可言。
+    只在力场活跃且需求 >1 cm 的帧上有效；wrapper 另报 >5 cm 敏感性和两种样本数。
     """
     from isaaclab.utils.math import quat_rotate
 

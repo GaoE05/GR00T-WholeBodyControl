@@ -414,7 +414,7 @@ class ManagerEnvWrapper:
                 atm_obs_dict[k] = v.unsqueeze(1)  # Add seq_len=1 dimension
 
         # SoftSONIC 诊断钩子：把一批真实的 ATM 观测存盘，供离线探针使用。
-        # 只在设置了 SOFTSONIC_DUMP_ATM_OBS 时触发，且只导出一次，对训练无影响。
+        # 只在设置了 SOFTSONIC_DUMP_ATM_OBS 时触发；默认单次，累积模式完成后停止。
         # 用真实观测（而非随机张量）才能测准 FSQ 量化后 token 对 residual 的灵敏度。
         dump_path = os.environ.get("SOFTSONIC_DUMP_ATM_OBS")
         # 延后若干步再导出：本函数在动作处理阶段执行，而力场事件在同一步的更晚阶段
@@ -460,7 +460,10 @@ class ManagerEnvWrapper:
             # 累积模式：payload 此时才算填完整（dof_pos_aug/ref 在上面的 try 里补的），
             # 拼接必须放在这里，放在前面会被后补的字段覆盖成单次的量。
             if _every > 0:
-                _buf.append(payload)
+                # A failed save leaves a complete batch pending. Retry that same
+                # batch without extending its sampling window past COUNT.
+                if len(_buf) < _count:
+                    _buf.append(payload)
                 self._softsonic_dump_buf = _buf
                 print(f"[SoftSONIC] 累积 dump {len(_buf)}/{_count}", flush=True)  # noqa: T201
                 if len(_buf) < _count:
@@ -472,8 +475,9 @@ class ManagerEnvWrapper:
                     for k in _buf[0] if isinstance(_buf[0][k], torch.Tensor)
                 }
                 payload["joint_names"] = _names
-                self._softsonic_atm_obs_dumped = True
             torch.save(payload, dump_path)
+            # Mark both one-shot and accumulated modes only after a successful write.
+            self._softsonic_atm_obs_dumped = True
             logger.info(f"[SoftSONIC] dumped ATM obs batch -> {dump_path}")
 
         return atm_obs_dict
@@ -1137,6 +1141,9 @@ class ManagerEnvWrapper:
             extras.setdefault("to_log", {})
             extras["to_log"]["softsonic/residual_norm_mean"] = rnorm.mean()
             extras["to_log"]["softsonic/residual_norm_max"] = rnorm.max()
+            # Counts include empty steps; means/medians are absent when count is zero.
+            extras["to_log"]["softsonic/compliance_progress_count"] = rnorm.new_zeros(())
+            extras["to_log"]["softsonic/compliance_progress_gt5cm_count"] = rnorm.new_zeros(())
             active = getattr(self.env, "_softsonic_active", None)
             if active is not None and active.any():
                 extras["to_log"]["softsonic/residual_norm_forced"] = rnorm[active].mean()
@@ -1174,7 +1181,7 @@ class ManagerEnvWrapper:
                             extras["to_log"]["softsonic/rigid_limit"] = lim[ok].mean()
 
                 # 主评价指标：归一化柔顺完成度（0=刚性，1=到达柔顺目标）。
-                # 与数据集量级无关，也不被 29 关节平均稀释 —— 见
+                # 按当前帧柔顺需求归一化，另报小分母敏感性 —— 见
                 # rewards.softsonic_compliance_progress 的 docstring。
                 try:
                     from gear_sonic.envs.manager_env.mdp.rewards import (
@@ -1188,6 +1195,23 @@ class ManagerEnvWrapper:
                             _prog.median()
                         )
                         extras["to_log"]["softsonic/compliance_demand_m"] = _den.mean()
+                        extras["to_log"]["softsonic/compliance_progress_count"] = _prog.new_tensor(
+                            _prog.numel()
+                        )
+                        # Reporting sensitivity only; retain the historical >1 cm keys.
+                        # The 4-env tail audit attributes 77.86% of soft's negative
+                        # magnitude to 1--5 cm demand; filtering is not policy improvement.
+                        _gt5cm = _den > 0.05
+                        extras["to_log"]["softsonic/compliance_progress_gt5cm_count"] = (
+                            _gt5cm.sum().float()
+                        )
+                        if _gt5cm.any():
+                            extras["to_log"]["softsonic/compliance_progress_gt5cm"] = (
+                                _prog[_gt5cm].mean()
+                            )
+                            extras["to_log"]["softsonic/compliance_progress_gt5cm_median"] = (
+                                _prog[_gt5cm].median()
+                            )
                 except Exception as _exc:  # noqa: BLE001
                     logger.warning(f"[SoftSONIC] compliance_progress 失败: {_exc}")
 
