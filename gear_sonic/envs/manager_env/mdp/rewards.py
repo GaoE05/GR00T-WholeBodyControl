@@ -640,32 +640,33 @@ def anti_shake_ang_vel_l2(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def _compliant_relative_ref(command: TrackingCommand):
-    """把柔顺目标 q_aug 的连杆位姿重锚到机器人当前 anchor，与 q_ref 侧同一套变换。
+def _compliant_yaw_alignment(command: TrackingCommand):
+    """Align yaw using q_aug's own anchor; retain height/roll/pitch errors.
 
-    复刻 ``TrackingCommand`` 里 ``body_pos_relative_w`` 的算法，只把 ``body_pos_w``
-    换成 ``body_pos_w_aug``。
-
-    **关键**：减去的仍是 ``anchor_pos_w``（q_ref 的 anchor），不是 q_aug 自己的。
-    用 q_ref 的 anchor 才能把 ``q_aug - q_ref`` 这个柔顺位移原样保留下来；若用
-    q_aug 自己的 anchor，骨盆的柔顺平移会被抵消掉，机器人就不会被奖励去移动骨盆。
-
-    Returns:
-        (pos_rel_aug, quat_rel_aug)，形状分别为 (E, B, 3) 和 (E, B, 4)。
+    SoftMimic rewards.py:152-212,218-253 uses each trajectory's own root XY
+    and the difference of their Euler yaw angles. Its reference properties return
+    adapted data (compliance_augmented_reference_command.py:491-519).
     """
-    from gear_sonic.trl.utils import torch_transform
+    from isaaclab.utils.math import euler_xyz_from_quat, quat_from_euler_xyz, wrap_to_pi
 
+    yaw_ref = euler_xyz_from_quat(command.anchor_quat_w_aug)[2]
+    yaw_robot = euler_xyz_from_quat(command.robot_anchor_quat_w)[2]
+    zeros = torch.zeros_like(yaw_ref)
+    return quat_from_euler_xyz(zeros, zeros, wrap_to_pi(yaw_robot - yaw_ref))
+
+
+def _compliant_relative_ref(command: TrackingCommand):
+    """Align q_aug root XY/yaw to the robot, retaining absolute target height.
+
+    Local terms supervise the augmented configuration. Root displacement itself
+    remains supervised by the global anchor / event-anchored force-link terms.
+    Using q_ref here counts the augmented root offset a second time (review B2).
+    """
     n_bodies = len(command.cfg.body_names)
-    anchor_pos_rep = command.anchor_pos_w[:, None, :].repeat(1, n_bodies, 1)
-    anchor_quat_rep = command.anchor_quat_w[:, None, :].repeat(1, n_bodies, 1)
-    robot_anchor_pos_rep = command.robot_anchor_pos_w[:, None, :].repeat(1, n_bodies, 1)
-    robot_anchor_quat_rep = command.robot_anchor_quat_w[:, None, :].repeat(1, n_bodies, 1)
-
-    delta_pos_w = robot_anchor_pos_rep.clone()
+    anchor_pos_rep = command.anchor_pos_w_aug[:, None, :].repeat(1, n_bodies, 1)
+    delta_pos_w = command.robot_anchor_pos_w[:, None, :].repeat(1, n_bodies, 1)
     delta_pos_w[..., 2] = anchor_pos_rep[..., 2]
-    delta_ori_w = torch_transform.get_heading_q(
-        quat_mul(robot_anchor_quat_rep, quat_inv(anchor_quat_rep))
-    )
+    delta_ori_w = _compliant_yaw_alignment(command)[:, None, :].repeat(1, n_bodies, 1)
     pos_rel = delta_pos_w + quat_apply(delta_ori_w, command.body_pos_w_aug - anchor_pos_rep)
     quat_rel = quat_mul(delta_ori_w, command.body_quat_w_aug)
     return pos_rel, quat_rel
@@ -719,20 +720,21 @@ def tracking_compliant_anchor_ori_error(
 def tracking_compliant_local_vr_5point_error(
     env: ManagerBasedRLEnv, command_name: str, std: float
 ) -> torch.Tensor:
-    """5 点局部跟踪奖励，目标为柔顺参考（对应 q_ref 版权重 2.0 的主项）。
+    """Track points in the same XY/yaw-local, absolute-height frame as SoftMimic.
 
-    与 q_ref 版一样把参考与机器人各自变换到自身 anchor 的局部系再比较；参考侧用
-    q_ref 的 anchor，使 q_aug 相对 q_ref 的位移得以保留。
+    Unlike the old full-root inverse transform, this retains height and tilt
+    errors. See SoftMimic rewards.py:152-212 and review B2.
     """
     command: TrackingCommand = env.command_manager.get_term(command_name)
     n_pts = len(command.cfg.reward_point_body)
-    ref_diff = command.reward_point_body_pos_w_aug - command.anchor_pos_w[:, None, :]
-    ref_quat = command.anchor_quat_w.view(env.num_envs, 1, 4).repeat(1, n_pts, 1)
-    ref_local = quat_apply(quat_inv(ref_quat), ref_diff)
-
-    robot_quat = command.robot_anchor_quat_w.view(env.num_envs, 1, 4).repeat(1, n_pts, 1)
-    robot_diff = command.robot_reward_point_body_pos_w - command.robot_anchor_pos_w[:, None, :]
-    robot_local = quat_apply(quat_inv(robot_quat), robot_diff)
+    ref_origin = command.anchor_pos_w_aug.clone()
+    robot_origin = command.robot_anchor_pos_w.clone()
+    ref_origin[:, 2] = 0.0
+    robot_origin[:, 2] = 0.0
+    ref_diff = command.reward_point_body_pos_w_aug - ref_origin[:, None, :]
+    delta_ori = _compliant_yaw_alignment(command)[:, None, :].repeat(1, n_pts, 1)
+    ref_local = quat_apply(delta_ori, ref_diff)
+    robot_local = command.robot_reward_point_body_pos_w - robot_origin[:, None, :]
 
     err = torch.sum(torch.square(robot_local - ref_local), dim=-1)
     return torch.exp(-err.mean(-1) / (std * std))
