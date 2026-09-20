@@ -460,7 +460,10 @@ class ManagerEnvWrapper:
             # 累积模式：payload 此时才算填完整（dof_pos_aug/ref 在上面的 try 里补的），
             # 拼接必须放在这里，放在前面会被后补的字段覆盖成单次的量。
             if _every > 0:
-                _buf.append(payload)
+                # A failed save leaves a complete batch pending. Retry that same
+                # batch without extending its sampling window past COUNT.
+                if len(_buf) < _count:
+                    _buf.append(payload)
                 self._softsonic_dump_buf = _buf
                 print(f"[SoftSONIC] 累积 dump {len(_buf)}/{_count}", flush=True)  # noqa: T201
                 if len(_buf) < _count:

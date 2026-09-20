@@ -44,6 +44,22 @@ class Diagnostics(unittest.TestCase):
                 for step in range(1,11): ns['dump'](obj,{'token':torch.tensor([[float(step)]])})
             self.assertEqual(len(saves),1)
             self.assertEqual(saves[0]['token'].flatten().tolist(),expected)
+        # A failed write after collecting COUNT must retry the original batch.
+        obj=NS(env=NS()); attempts=[]
+        def transient_save(payload, path):
+            attempts.append(payload['token'].flatten().tolist())
+            if len(attempts)==1:
+                raise OSError('transient write failure')
+        with patch.dict(os.environ,{'SOFTSONIC_DUMP_ATM_OBS':'unused','SOFTSONIC_DUMP_ATM_OBS_AFTER':'2',
+                'SOFTSONIC_DUMP_ATM_OBS_EVERY':'2','SOFTSONIC_DUMP_ATM_OBS_COUNT':'3'}), \
+                patch.object(torch,'save',transient_save):
+            for step in range(1,11):
+                try:
+                    ns['dump'](obj,{'token':torch.tensor([[float(step)]])})
+                except OSError:
+                    self.assertEqual(step,6)
+        self.assertEqual(attempts,[[2.,4.,6.],[2.,4.,6.]])
+        self.assertEqual(len(obj._softsonic_dump_buf),3)
         for every in [0,1]:
             obj=NS(env=NS())
             with patch.dict(os.environ,{'SOFTSONIC_DUMP_ATM_OBS':'unused','SOFTSONIC_DUMP_ATM_OBS_AFTER':'1',
