@@ -407,7 +407,6 @@ def apply_softsonic_force_field(
         anchored = quat_rotate(a_rot, ref_pos - a_ref) + a_pos
         anchored[:, 2] = ref_pos[:, 2]   # 只锚 XY+偏航，Z 保持数据原值
         ref_pos = anchored
-        ref_quat = quat_mul(a_rot, ref_quat)
 
         hand_pos = robot.data.body_pos_w[rows, cols]
         hand_quat = robot.data.body_quat_w[rows, cols]
@@ -422,7 +421,12 @@ def apply_softsonic_force_field(
             ang[:, None] > 1e-8, delta_rv[rows] / ang.clamp(min=1e-8)[:, None],
             torch.tensor([1.0, 0.0, 0.0], device=env.device).expand_as(delta_rv[rows]),
         )
-        setpoint_quat = quat_mul(quat_from_angle_axis(ang, axis), ref_quat)
+        # Bridge stores D = R_ff * inverse(R_ref) in the data world frame.
+        # Rotate the COMPLETE setpoint: A * D * R_ref, never D * A * R_ref.
+        # SoftMimic compliance_augmented_reference_command.py:418-421 (B3).
+        setpoint_quat = quat_mul(
+            a_rot, quat_mul(quat_from_angle_axis(ang, axis), ref_quat)
+        )
         t = k_ff_rot[rows, None] * axis_angle_from_quat(
             quat_mul(setpoint_quat, quat_inv(hand_quat))
         )
@@ -445,8 +449,11 @@ def apply_softsonic_force_field(
         actual_t[rows] = t
     env._softsonic_force_actual = actual_f  # noqa: SLF001
     env._softsonic_torque_actual = actual_t  # noqa: SLF001
-    env._softsonic_force_desired = ss[:, sl["desired_force"]].clone()  # noqa: SLF001
-    env._softsonic_torque_desired = ss[:, sl["desired_torque"]].clone()  # noqa: SLF001
+    # Desired wrench must share the anchored world frame of actual_f/actual_t.
+    # SoftMimic compliance_augmented_reference_command.py:444-446 (B3).
+    anchor_rot = env._softsonic_ff_anchor_rot  # noqa: SLF001
+    env._softsonic_force_desired = quat_rotate(anchor_rot, ss[:, sl["desired_force"]])  # noqa: SLF001
+    env._softsonic_torque_desired = quat_rotate(anchor_rot, ss[:, sl["desired_torque"]])  # noqa: SLF001
 
     # 逐帧的"完全刚性"参考值，供评价指标归一化用。
     #
