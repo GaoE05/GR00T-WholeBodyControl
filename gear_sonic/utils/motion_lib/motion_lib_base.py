@@ -99,6 +99,30 @@ SOFTSONIC_AUG_POSE_FIELD = "pose_aa_aug"
 SOFTSONIC_AUG_TRANS_FIELD = "root_trans_aug"
 # ──────────────────────────────────────────────────────────────────────────────
 
+def _resample_softsonic_metadata(raw_ss, source_fps, target_fps, n_target):
+    """Sample field metadata at FK timestamps, retaining nearest-neighbor policy.
+
+    SoftMimic motion_lib_from_multi_csv_compliance_augmented.py:206-218,262-274
+    derives pose and field indices from the same motion time (it uses floor for
+    fields). Our existing nearest-neighbor policy is retained; only the time grid
+    is corrected to torch_humanoid_batch.py:342-350. No endpoint stretching.
+    """
+    if source_fps == target_fps:
+        if raw_ss.shape[0] != n_target:
+            raise ValueError("SoftSONIC/FK frame count mismatch at equal FPS")
+        return raw_ss
+    duration = (raw_ss.shape[0] - 1) * 1 / source_fps
+    times = torch.arange(
+        0, duration, 1 / target_fps, dtype=torch.float32, device=raw_ss.device
+    )
+    if times.numel() != n_target:
+        raise ValueError(
+            f"SoftSONIC/FK timestamp count mismatch: {times.numel()} != {n_target}"
+        )
+    src_idx = (times * source_fps).round().long().clamp(0, raw_ss.shape[0] - 1)
+    return raw_ss[src_idx]
+
+
 class MotionlibMode(enum.Enum):
     file = 1
     directory = 2
@@ -2386,20 +2410,12 @@ class MotionLibBase:
                     curr_motion.aug_dof_vel = aug_out["dof_vels"].squeeze(0)
                 if self.has_softsonic:
                     raw_ss = to_torch(curr_file[SOFTSONIC_FIELD]).clone()[start:end]
-                    # 必须重采样到与 fk_batch 输出相同的帧数。curr_file 里的字段是
-                    # 源 fps（CMA 输出 30Hz），而 global_rotation 已被 fk_batch 重采样到
-                    # target_fps（50Hz）；length_starts 是按重采样后的帧数累加的，
-                    # 不对齐的话 get_motion_softsonic 会索引越界。
-                    n_tgt = curr_motion.global_rotation.shape[0]
-                    if raw_ss.shape[0] != n_tgt:
-                        # 最近邻是正确的选择：本字段现在只存外力、力矩和 body id，
-                        # 三者都是分段常量，插值没有物理意义。（q_aug 的位姿已改走
-                        # fk_batch，由它做正确的插值。）
-                        src_idx = torch.linspace(
-                            0, raw_ss.shape[0] - 1, n_tgt, device=raw_ss.device
-                        ).round().long()
-                        raw_ss = raw_ss[src_idx]
-                    curr_motion.softsonic = raw_ss
+                    # A matching frame count alone does not imply matching times.
+                    # Continuous field interpolation remains a separate decision.
+                    curr_motion.softsonic = _resample_softsonic_metadata(
+                        raw_ss, curr_file["fps"], self.target_fps,
+                        curr_motion.global_rotation.shape[0],
+                    )
 
                 # Extract hand DOFs if motion file has more than 29 DOFs
                 hand_dof_count = self.m_cfg.get("hand_dof_count", 0)
