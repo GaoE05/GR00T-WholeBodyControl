@@ -11,14 +11,16 @@ This can help reduce memory fragmentation.
 
 
 class RunningMeanStd(nn.Module):
-    """Merge population moments; version 2 uses correction=0 batch variance.
+    """Keep legacy batch statistics while preventing singleton corruption.
 
-    The state_dict metadata records this update definition. Loading old buffers
-    preserves them exactly; their past sample-variance updates cannot be undone.
-    Frozen inference therefore retains the checkpoint's original behavior.
+    Version 3 leaves the established training update unchanged for batches with
+    at least two samples. A singleton has no finite unbiased sample variance,
+    so it normalizes with the existing buffers and does not update them. Real
+    evaluation must still put the model in eval mode or freeze its normalizers.
     """
 
-    _version = 2
+    _version = 3
+
 
     def __init__(self, insize, epsilon=1e-05, per_channel=False, norm_only=False):
         super().__init__()
@@ -134,12 +136,13 @@ class RunningMeanStd(nn.Module):
                 y = torch.clamp(y, min=-5.0, max=5.0)
 
         # update After normalization, so that the values used for training and testing are the same.
-        if self.training and not self.frozen:
+        if self.training and not self.frozen and input.size(0) >= 2:
+            # Preserve the released training definition. For a singleton,
+            # torch.var(correction=1) is undefined; skipping that update keeps
+            # the previously finite statistics intact without changing normal
+            # multi-environment training trajectories.
             mean = input.mean(self.axis)  # along channel axis
-            # The parallel-moment merge below consumes population variance.
-            # Sample variance is undefined for a singleton and makes subsequent
-            # inference NaN even though this call used the previous finite stats.
-            var = input.var(self.axis, correction=0)
+            var = input.var(self.axis)
 
             new_mean, new_var, new_count = self._update_mean_var_count_from_moments(
                 self.running_mean, self.running_var, self.count, mean, var, input.size()[0]
