@@ -1632,6 +1632,12 @@ class TRLPPOTrainer(PPOTrainer):  # noqa: F405
 
         return metrics
 
+    def _project_policy_std(self):
+        """Project policy noise parameters at an explicit training boundary."""
+        project_std = getattr(self.policy_model, "project_std_", None)
+        if project_std is not None:
+            project_std()
+
     def train(self):
         """Run the full PPO training loop until ``num_total_batches`` iterations.
 
@@ -1705,6 +1711,10 @@ class TRLPPOTrainer(PPOTrainer):  # noqa: F405
                 self.scheduled_params_dict = scheduler.update_scheduled_params(
                     self, self.schedule_dict, self.state.global_step
                 )
+
+            # Match the legacy projection before the first forward of every
+            # rollout, including after a callback or schedule changes state.
+            self._project_policy_std()
 
             reinit_dr_freq = self.env.config.get("reinit_dr_freq", 0)
             if reinit_dr_freq > 0 and self.state.global_step % reinit_dr_freq == 0:
@@ -1787,6 +1797,7 @@ class TRLPPOTrainer(PPOTrainer):  # noqa: F405
                                     if grad_norm is not None:
                                         with common.Timer("optimizer_step"):
                                             optimizer.step()
+                                            self._project_policy_std()
                                     else:
                                         print("NaN in gradient! Skipped!!!!")  # noqa: T201
 

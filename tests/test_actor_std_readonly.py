@@ -91,6 +91,43 @@ def test_projected_std_keeps_legacy_identity_gradient_at_boundaries():
     torch.testing.assert_close(actor.std, raw_std, rtol=0, atol=0)
 
 
+def test_explicit_post_step_projection_matches_legacy_multi_step_trajectory():
+    initial = torch.tensor([0.49, 0.06])
+    actor = _make_actor(initial)
+    legacy_std = nn.Parameter(initial.clone())
+    actor_optimizer = torch.optim.Adam([actor.std], lr=0.05)
+    legacy_optimizer = torch.optim.Adam([legacy_std], lr=0.05)
+    gradient = torch.tensor([-1.0, 1.0])
+
+    # The trainer projects once before its first rollout/forward.
+    actor.project_std_()
+    for _ in range(6):
+        # This is where the old getter performed its hidden write.
+        with torch.no_grad():
+            legacy_std.clamp_(min=0.05, max=0.8)
+            legacy_std.clamp_(max=0.5)
+
+        torch.testing.assert_close(actor.std, legacy_std, rtol=0, atol=0)
+        actor_optimizer.zero_grad()
+        legacy_optimizer.zero_grad()
+        (actor.get_std * gradient).sum().backward()
+        (legacy_std * gradient).sum().backward()
+        actor_optimizer.step()
+        legacy_optimizer.step()
+        # The new trainer makes the same projection explicit immediately
+        # after the update, before any subsequent rollout or PPO forward.
+        actor.project_std_()
+        assert torch.all(actor.std >= 0.05)
+        assert torch.all(actor.std <= 0.5)
+
+    with torch.no_grad():
+        legacy_std.clamp_(min=0.05, max=0.8)
+        legacy_std.clamp_(max=0.5)
+    torch.testing.assert_close(actor.std, legacy_std, rtol=0, atol=0)
+    for key, value in actor_optimizer.state[actor.std].items():
+        torch.testing.assert_close(value, legacy_optimizer.state[legacy_std][key], rtol=0, atol=0)
+
+
 def test_legacy_std_checkpoint_loads_strictly_without_schema_changes():
     source = _make_actor([0.04, 0.2, 0.50002408, 0.9])
     legacy_state = source.state_dict()
@@ -116,3 +153,6 @@ def test_invalid_log_std_uses_safe_read_without_repairing_checkpoint_state():
     torch.testing.assert_close(std[:2], torch.full((2,), 0.5), rtol=0, atol=0)
     torch.testing.assert_close(std[2], torch.exp(values[2]), rtol=0, atol=0)
     assert _state_hash(actor) == before
+
+    actor.project_std_()
+    torch.testing.assert_close(actor.log_std, torch.full((3,), torch.log(torch.tensor(0.5))))

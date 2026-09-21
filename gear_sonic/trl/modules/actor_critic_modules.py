@@ -155,6 +155,30 @@ class Actor(nn.Module):
         projected = torch.clamp(value, min=min, max=max)
         return projected.detach() + (value - value.detach())
 
+    @torch.no_grad()
+    def project_std_(self):
+        """Project trainable noise parameters at an explicit update boundary.
+
+        ``get_std`` must remain a pure read so evaluation cannot alter a loaded
+        checkpoint.  The trainer calls this method before rollouts and after
+        optimizer steps to retain the legacy training-time parameter
+        bounds without hiding writes inside ``forward``.
+        """
+        if self.use_log_std:
+            # Match the legacy training behavior for a corrupted log_std: one
+            # invalid element reset the full vector to the safe default.
+            if not torch.all(torch.isfinite(self.log_std)):
+                self.log_std.fill_(torch.log(self.log_std.new_tensor(0.5)))
+            return
+
+        if self.algo_config.get("use_clampped_std", False):
+            self.std.clamp_(
+                min=self.algo_config.std_clamp_min,
+                max=self.algo_config.std_clamp_max,
+            )
+        if self.clamp_noise_std:
+            self.std.clamp_(max=self.max_noise_std)
+
     @property
     def get_std(self):
         """Get the standard deviation, handling both std and log_std parameterizations."""
