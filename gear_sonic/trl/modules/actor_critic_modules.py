@@ -142,22 +142,39 @@ class Actor(nn.Module):
     def reset(self, dones=None):
         pass
 
+    @staticmethod
+    def _straight_through_clamp(value, min=None, max=None):
+        """Clamp the forward value while preserving the input gradient.
+
+        The legacy ``std`` path projected the parameter in place under
+        ``no_grad`` and then returned that parameter.  Its forward value was
+        bounded, while its derivative with respect to the (already projected)
+        parameter remained one.  This functional form keeps both properties
+        without making a read mutate model state.
+        """
+        projected = torch.clamp(value, min=min, max=max)
+        return projected.detach() + (value - value.detach())
+
     @property
     def get_std(self):
         """Get the standard deviation, handling both std and log_std parameterizations."""
         if self.use_log_std:
-            # First, handle NaN or inf in log_std
-            if torch.any(torch.isnan(self.log_std)) or torch.any(torch.isinf(self.log_std)):
-                print("[ERROR] log_std contains NaN or Inf! Resetting to safe values.")
-                with torch.no_grad():
-                    self.log_std.data = torch.log(torch.ones_like(self.log_std) * 0.5)
+            # Handle invalid values for this read without repairing model state
+            # as a side effect of inference.
+            finite_log_std = torch.isfinite(self.log_std)
+            if not torch.all(finite_log_std):
+                print("[ERROR] log_std contains NaN or Inf! Using safe values for this read.")
+                safe_log_std = torch.log(torch.ones_like(self.log_std) * 0.5)
+                log_std = torch.where(finite_log_std, self.log_std, safe_log_std)
+            else:
+                log_std = self.log_std
 
             # Apply clamping if configured before computing std
             if self.algo_config.get("use_clampped_std", False):
                 std_min = self.algo_config.std_clamp_min
                 std_max = self.algo_config.std_clamp_max
                 log_std_clamped = torch.clamp(
-                    self.log_std,
+                    log_std,
                     min=torch.log(
                         torch.tensor(std_min, dtype=self.log_std.dtype, device=self.log_std.device)
                     ),
@@ -171,7 +188,7 @@ class Actor(nn.Module):
 
             if self.clamp_noise_std:
                 log_std_clamped = torch.clamp(
-                    self.log_std,
+                    log_std,
                     max=torch.log(
                         torch.tensor(
                             self.max_noise_std, dtype=self.log_std.dtype, device=self.log_std.device
@@ -183,21 +200,21 @@ class Actor(nn.Module):
                 return std
 
             # Default case: clamp log_std to prevent extreme values
-            log_std_clamped = torch.clamp(self.log_std, min=-20, max=2)
+            log_std_clamped = torch.clamp(log_std, min=-20, max=2)
             std = torch.exp(log_std_clamped)
             std = torch.clamp(std, min=1e-6)
             return std
         else:
-            # Original std parameterization with in-place clamping
+            std = self.std
             if self.algo_config.get("use_clampped_std", False):
-                with torch.no_grad():
-                    self.std.clamp_(
-                        min=self.algo_config.std_clamp_min, max=self.algo_config.std_clamp_max
-                    )
+                std = self._straight_through_clamp(
+                    std,
+                    min=self.algo_config.std_clamp_min,
+                    max=self.algo_config.std_clamp_max,
+                )
             if self.clamp_noise_std:
-                with torch.no_grad():
-                    self.std.clamp_(max=self.max_noise_std)
-            return self.std
+                std = self._straight_through_clamp(std, max=self.max_noise_std)
+            return std
 
     def forward(self, obs_dict, is_training=False, **kwargs):
         """Compute action means from observations.
