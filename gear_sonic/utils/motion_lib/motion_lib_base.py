@@ -741,9 +741,26 @@ class MotionLibBase:
 
         The field mask comes from both stiffness columns in ``_motion_softsonic``;
         source CSV force magnitudes and source-frame indices are intentionally not
-        consulted. Recovery is required continuously from the sampled start to
-        the event onset for root/joint pose and velocity.
+        consulted. Root/joint pose and velocity recovery is required at the
+        sampled reset frame itself; later pre-onset q_aug motion is preserved.
         """
+        self._pre_force_reset_config = {
+            "window_s": window_s,
+            "min_lead_s": min_lead_s,
+            "min_tail_s": min_tail_s,
+            "pose_tolerance": pose_tolerance,
+            "velocity_tolerance": velocity_tolerance,
+            "field_tolerance": field_tolerance,
+        }
+
+        for name, value in (
+            ("pose_tolerance", pose_tolerance),
+            ("velocity_tolerance", velocity_tolerance),
+            ("field_tolerance", field_tolerance),
+        ):
+            if value < 0:
+                raise ValueError(f"{name} must be non-negative, got {value}")
+
         if not self.has_softsonic or not self.has_aug_pose:
             raise RuntimeError(
                 "reset_before_force_event=True requires softsonic, pose_aa_aug, "
@@ -2018,6 +2035,11 @@ class MotionLibBase:
             if self.has_aug_pose:
                 self.body_pos_w_aug_full = self.body_pos_w_aug
                 self.body_quat_w_aug_full = self.body_quat_w_aug
+
+        # Training/evaluation callbacks can replace the loaded motion batch.
+        # Rebuild reset-C indices before any reset samples from the new buffers.
+        if hasattr(self, "_pre_force_reset_config"):
+            self.configure_pre_force_reset(**self._pre_force_reset_config)
 
         # Run cleanup after slicing so temporary fragments do not live through the next cycle.
         gc.collect()

@@ -134,13 +134,14 @@ def build_pre_force_reset_index(
     min_lead_s: float,
     min_tail_s: float,
 ) -> PreForceResetIndex:
-    """Build legal starts from contiguous inactive/recovered event prefixes.
+    """Build legal starts from the contiguous inactive gap before each event.
 
     A legal candidate is in the immediately preceding inactive gap, within the
-    configured time window, at least ``min_lead_s`` before onset, and followed
-    only by recovered frames up to onset.  An event must close and leave the
-    requested post-event tail.  Both masks are expected on the runtime motion
-    grid, after all loading and resampling.
+    configured time window, at least ``min_lead_s`` before onset, and recovered
+    at the candidate frame itself. It need not remain recovered up to onset: the
+    current dataset's q_aug velocity leads field activation by 4--9 runtime
+    frames. An event must close and leave the requested post-event tail. Both
+    masks are expected after all loading and resampling.
     """
     if active.ndim != 1 or recovered.ndim != 1 or active.shape != recovered.shape:
         raise ValueError("active and recovered must be same-length 1-D tensors")
@@ -203,15 +204,15 @@ def build_pre_force_reset_index(
                 rejected_no_candidate_events += 1
                 continue
 
-            # Require a continuous recovered suffix, not a one-frame coincidence.
-            bad = torch.nonzero(~motion_recovered[low:start], as_tuple=False).flatten()
-            if bad.numel() > 0:
-                low = low + int(bad[-1]) + 1
-            if high < low:
+            candidates = torch.arange(low, high + 1, dtype=torch.long, device=active.device)
+            # Approved relaxed definition: the reset frame itself must match
+            # q_ref in pose and velocity. Later q_aug motion before field onset
+            # is retained rather than silently phase-shifting the source data.
+            candidates = candidates[motion_recovered[candidates]]
+            if candidates.numel() == 0:
                 rejected_no_candidate_events += 1
                 continue
 
-            candidates = torch.arange(low, high + 1, dtype=torch.long, device=active.device)
             event_motion_ids.append(motion_id)
             event_starts.append(start)
             event_ends.append(end)
@@ -247,11 +248,12 @@ def project_adaptive_bins_to_events(
     bin_ends: torch.Tensor,
     bin_weights: torch.Tensor,
 ) -> torch.Tensor:
-    """Project adaptive bin mass onto overlapping force events.
+    """Project adaptive bin mass onto event-conditioned rollout spans.
 
-    Each bin's mass is split equally between overlapping events. Bins without
-    an event are discarded and the result is normalized. Thus adaptive failure
-    statistics affect event choice directly, while legal-lead count never does.
+    A span runs from an event's earliest legal candidate through field end.
+    Each bin's mass is split equally between overlapping spans. Bins without a
+    reachable event are discarded and the result is normalized. Thus adaptive
+    failure statistics affect event choice, while legal-lead count never does.
     """
     tensors = (bin_motion_ids, bin_starts, bin_ends, bin_weights)
     if any(t.ndim != 1 for t in tensors) or len({t.numel() for t in tensors}) != 1:
@@ -259,10 +261,13 @@ def project_adaptive_bins_to_events(
     weights = torch.zeros(
         index.num_events, dtype=torch.float64, device=index.event_motion_ids.device
     )
+    event_support_starts = index.candidate_steps[index.candidate_offsets[:-1]]
+    # Every indexed event has at least one candidate by construction.
+    assert event_support_starts.shape == index.event_starts.shape
     for motion_id, start, end, mass in zip(*tensors, strict=True):
         overlaps = torch.nonzero(
             (index.event_motion_ids == motion_id)
-            & (index.event_starts < end)
+            & (event_support_starts < end)
             & (index.event_ends > start),
             as_tuple=False,
         ).flatten()

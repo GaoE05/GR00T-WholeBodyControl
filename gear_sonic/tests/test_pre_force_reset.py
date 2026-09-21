@@ -41,7 +41,7 @@ def test_seconds_map_to_runtime_grid():
     assert index_30.candidate_steps.tolist() == list(range(15, 40))
 
 
-def test_contiguous_idle_gap_and_recovered_suffix():
+def test_contiguous_idle_gap_and_candidate_recovery():
     active = torch.zeros(100, dtype=torch.bool)
     active[10:20] = True
     active[70:80] = True
@@ -49,9 +49,12 @@ def test_contiguous_idle_gap_and_recovered_suffix():
     recovered[53:56] = False
     index = make_index(active, recovered)
     # First event has only the frame exactly 0.2 s before onset. The second
-    # cannot cross the previous event or the last unrecovered frame.
+    # cannot cross the previous event; only the unrecovered frames themselves
+    # are rejected under the approved relaxed definition.
     assert index.event_starts.tolist() == [10, 70]
-    assert index.candidate_steps.tolist() == [0, 56, 57, 58, 59, 60]
+    expected = [0, *range(20, 53), *range(56, 61)]
+    assert index.candidate_steps.tolist() == expected
+    assert recovered[index.candidate_steps].all()
 
 
 def test_tail_and_missing_candidates_are_explicit():
@@ -97,13 +100,14 @@ def test_conditioned_sampling_and_adaptive_projection():
     motion_ids, _, _ = index.sample(4, motion_ids=requested)
     torch.testing.assert_close(motion_ids, requested)
 
-    # Local-motion bins: mass .2 overlaps event 0, mass .3 event 1, mass .5
-    # event 2. This is direct event reweighting, not frame sampling + snapping.
+    # These bins overlap only legal pre-event rollout spans, not the active
+    # fields themselves. Adaptive mass still reaches the corresponding event:
+    # this is direct event reweighting, not frame sampling + snapping.
     weights = project_adaptive_bins_to_events(
         index,
         torch.tensor([0, 0, 1]),
-        torch.tensor([0, 50, 50]),
-        torch.tensor([50, 120, 100]),
+        torch.tensor([0, 50, 10]),
+        torch.tensor([15, 95, 55]),
         torch.tensor([0.2, 0.3, 0.5]),
     )
     torch.testing.assert_close(weights, torch.tensor([0.2, 0.3, 0.5], dtype=torch.float64))
@@ -115,13 +119,16 @@ def test_all_command_sampling_entry_points_use_reset_c_sampler():
         / "envs/manager_env/mdp/commands.py"
     ).read_text()
     # configure + initial assignment + forward_motion_samples + evaluating +
-    # paired + multi-object + ordinary/adaptive reset.
-    assert source.count("sample_pre_force_reset(") == 6
+    # paired + multi-object event/motion choice + multi-object lead + ordinary reset.
+    assert source.count("sample_pre_force_reset(") == 7
     assert "configure_pre_force_reset(" in source
-    assert "field_stiffness = self._motion_softsonic[:, 7:9]" in (
+    motion_lib_source = (
         Path(__file__).resolve().parents[1]
         / "utils/motion_lib/motion_lib_base.py"
     ).read_text()
+    assert "field_stiffness = self._motion_softsonic[:, 7:9]" in motion_lib_source
+    assert 'hasattr(self, "_pre_force_reset_config")' in motion_lib_source
+
 
 
 if __name__ == "__main__":

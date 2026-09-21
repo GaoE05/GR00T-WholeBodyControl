@@ -781,6 +781,9 @@ class TrackingCommand(CommandTerm):
         inst.encoder_sample_probs_dict = None
         inst.encoder_sample_probs = None
         inst.is_evaluating = False
+        # Offline construction bypasses __init__. Keep the opt-in reset-C path
+        # disabled unless a fully configured online command term enables it.
+        inst.reset_before_force_event = False
 
         # Metrics dict (normally set by CommandTerm.__init__)
         inst.metrics = {}
@@ -3028,9 +3031,14 @@ class TrackingCommand(CommandTerm):
                 # MULTI-OBJECT MODE: Resetting envs sample a new motion (and corresponding object)
                 # Over time, staggered resets lead to different envs using different objects,
                 # which provides training diversity. Object positioning (below) handles per-env instances.
-                new_motion_id = self.motion_lib.sample_motions(1)[0]
-                self.motion_ids[env_ids] = new_motion_id
                 if self.reset_before_force_event:
+                    # Preserve the mode's one-object-per-reset-batch contract,
+                    # but choose that motion through the event distribution so
+                    # clips with longer idle gaps gain no implicit weight.
+                    sampled_motion_ids, _ = self.motion_lib.sample_pre_force_reset(
+                        1, adaptive=self.use_adaptive_sampling
+                    )
+                    self.motion_ids[env_ids] = sampled_motion_ids[0]
                     _, sampled_times = self.motion_lib.sample_pre_force_reset(
                         len(env_ids),
                         motion_ids=self.motion_ids[env_ids],
@@ -3038,6 +3046,8 @@ class TrackingCommand(CommandTerm):
                     )
                     self.motion_start_time_steps[env_ids] = sampled_times
                 else:
+                    new_motion_id = self.motion_lib.sample_motions(1)[0]
+                    self.motion_ids[env_ids] = new_motion_id
                     self.motion_start_time_steps[env_ids] = self.motion_lib.sample_time_steps(
                         self.motion_ids[env_ids], truncate_time=None
                     )
@@ -4274,8 +4284,8 @@ class TrackingCommandCfg(CommandTermCfg):
     # 理由见 _reset 里该分支的注释。要求动作数据带 pose_aa_aug 字段。
     reset_from_compliant_target: bool = False
 
-    # Reset C: start in the continuous recovered/no-field prefix of a force
-    # event, so the rollout observes the original discrete ramp from its onset.
+    # Reset C: start at a recovered frame in the continuous no-field prefix of
+    # an event, so the rollout observes the original discrete ramp from onset.
     # All durations are seconds and are converted on the loaded runtime grid.
     reset_before_force_event: bool = False
     reset_before_force_window_s: float = 1.0
