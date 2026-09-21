@@ -21,6 +21,10 @@ import torch.multiprocessing as mp
 from gear_sonic.isaac_utils import rotations
 from gear_sonic.trl.utils import common
 from gear_sonic.utils.motion_lib import skeleton
+from gear_sonic.utils.motion_lib.pre_force_reset import (
+    build_pre_force_reset_index,
+    project_adaptive_bins_to_events,
+)
 from gear_sonic.utils.motion_lib.softsonic_contract import inspect_motion_batch, get_worker_result
 
 
@@ -722,6 +726,138 @@ class MotionLibBase:
         if not self.has_aug_pose:
             return self.get_body_ang_vel_w(motion_ids, motion_steps)
         return self.body_ang_vel_w_aug[motion_steps + self.length_starts[motion_ids]]
+
+    def configure_pre_force_reset(
+        self,
+        *,
+        window_s,
+        min_lead_s,
+        min_tail_s,
+        pose_tolerance,
+        velocity_tolerance,
+        field_tolerance,
+    ):
+        """Build reset-C legality from the loaded, resampled motion buffers.
+
+        The field mask comes from both stiffness columns in ``_motion_softsonic``;
+        source CSV force magnitudes and source-frame indices are intentionally not
+        consulted. Recovery is required continuously from the sampled start to
+        the event onset for root/joint pose and velocity.
+        """
+        if not self.has_softsonic or not self.has_aug_pose:
+            raise RuntimeError(
+                "reset_before_force_event=True requires softsonic, pose_aa_aug, "
+                "and root_trans_aug data"
+            )
+        fps_values = self._motion_fps.unique()
+        if fps_values.numel() != 1:
+            raise RuntimeError(
+                f"reset C requires one runtime FPS, got {fps_values.detach().cpu().tolist()}"
+            )
+        fps = float(fps_values[0])
+        if abs(fps - float(self._sim_fps)) > 1e-6:
+            raise RuntimeError(
+                f"reset C requires motion FPS ({fps}) to equal command FPS ({self._sim_fps})"
+            )
+
+        field_stiffness = self._motion_softsonic[:, 7:9]
+        active = (field_stiffness.abs() > field_tolerance).any(dim=1)
+
+        root_pos_error = (self.body_pos_w[:, 0] - self.body_pos_w_aug[:, 0]).abs().amax(dim=1)
+        root_quat = self.body_quat_w[:, 0]
+        root_quat_aug = self.body_quat_w_aug[:, 0]
+        # q and -q encode the same rotation.
+        root_quat_error = torch.minimum(
+            (root_quat - root_quat_aug).abs().amax(dim=1),
+            (root_quat + root_quat_aug).abs().amax(dim=1),
+        )
+        dof_pos_error = (self.dof_pos - self.dof_pos_aug).abs().amax(dim=1)
+        pose_error = torch.maximum(
+            torch.maximum(root_pos_error, root_quat_error), dof_pos_error
+        )
+
+        root_lin_vel_error = (
+            self.body_lin_vel_w[:, 0] - self.body_lin_vel_w_aug[:, 0]
+        ).abs().amax(dim=1)
+        root_ang_vel_error = (
+            self.body_ang_vel_w[:, 0] - self.body_ang_vel_w_aug[:, 0]
+        ).abs().amax(dim=1)
+        dof_vel_error = (self.dof_vel - self.dof_vel_aug).abs().amax(dim=1)
+        velocity_error = torch.maximum(
+            torch.maximum(root_lin_vel_error, root_ang_vel_error), dof_vel_error
+        )
+        recovered = (pose_error <= pose_tolerance) & (velocity_error <= velocity_tolerance)
+
+        self.pre_force_reset_index = build_pre_force_reset_index(
+            active,
+            recovered,
+            self._motion_num_frames,
+            fps=fps,
+            window_s=window_s,
+            min_lead_s=min_lead_s,
+            min_tail_s=min_tail_s,
+        )
+        self.pre_force_reset_pose_error = pose_error
+        self.pre_force_reset_velocity_error = velocity_error
+        index = self.pre_force_reset_index
+        logger.info(
+            "Reset C: {} legal starts across {}/{} force events at {} Hz "
+            "(tail rejected {}, no-candidate rejected {})",
+            index.num_candidates,
+            index.num_events,
+            index.total_events,
+            fps,
+            index.rejected_tail_events,
+            index.rejected_no_candidate_events,
+        )
+        if index.num_events == 0:
+            raise RuntimeError("reset C found no legal pre-force event in the loaded motion batch")
+
+    def _adaptive_pre_force_event_weights(self):
+        """Project current adaptive frame-bin probabilities onto reset-C events."""
+        if not self.use_adaptive_sampling:
+            raise RuntimeError("adaptive reset-C weights requested while adaptive sampling is off")
+        bin_motion_ids = []
+        bin_starts = []
+        bin_ends = []
+        bin_weights = []
+        cursor = 0
+        for local_motion_id, orig_motion_id_tensor in enumerate(self._curr_motion_ids):
+            orig_motion_id = int(orig_motion_id_tensor)
+            global_bin_ids = self.orig_motion_id_to_bins[orig_motion_id]
+            count = global_bin_ids.numel()
+            active_bin_ids = self.adp_samp_active_motion_bins[cursor : cursor + count]
+            if not torch.equal(active_bin_ids, global_bin_ids):
+                raise RuntimeError("adaptive active-bin order no longer matches loaded motions")
+            bins = self.adp_samp_bins[global_bin_ids]
+            bin_motion_ids.append(
+                torch.full(
+                    (count,), local_motion_id, dtype=torch.long, device=self._device
+                )
+            )
+            bin_starts.append(bins[:, 1])
+            bin_ends.append(bins[:, 2])
+            bin_weights.append(self.adp_sampling_active_prob[cursor : cursor + count])
+            cursor += count
+        if cursor != self.adp_sampling_active_prob.numel():
+            raise RuntimeError("adaptive active-bin probability length mismatch")
+        return project_adaptive_bins_to_events(
+            self.pre_force_reset_index,
+            torch.cat(bin_motion_ids),
+            torch.cat(bin_starts),
+            torch.cat(bin_ends),
+            torch.cat(bin_weights),
+        )
+
+    def sample_pre_force_reset(self, n, *, motion_ids=None, adaptive=False):
+        """Sample reset-C motion/event pairs without snapping arbitrary frames."""
+        if not hasattr(self, "pre_force_reset_index"):
+            raise RuntimeError("configure_pre_force_reset() must run before sampling reset C")
+        event_weights = self._adaptive_pre_force_event_weights() if adaptive else None
+        sampled_motion_ids, sampled_steps, _ = self.pre_force_reset_index.sample(
+            n, motion_ids=motion_ids, event_weights=event_weights
+        )
+        return sampled_motion_ids, sampled_steps.int()
 
     def get_time_step_total(self, motion_ids):
         return self._motion_num_frames[motion_ids]
