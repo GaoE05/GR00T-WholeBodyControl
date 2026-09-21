@@ -2,6 +2,17 @@ motion:
   _target_: gear_sonic.envs.manager_env.mdp.commands.TrackingCommandCfg
   asset_name: "robot"
 
+  # RESET-C is opt-in; A remains the default. Durations are seconds, not source
+  # frames or control-step literals. C is mutually exclusive with reset B and
+  # other start-time overrides.
+  reset_before_force_event: false
+  reset_before_force_window_s: 1.0
+  reset_before_force_min_lead_s: 0.2
+  reset_before_force_min_tail_s: 0.2
+  reset_before_force_pose_tolerance: 1.0e-5
+  reset_before_force_velocity_tolerance: 1.0e-4
+  reset_before_force_field_tolerance: 0.0
+
   motion_lib_cfg:
     motion_file: ${robot.motion.motion_file}
     smpl_motion_file:
