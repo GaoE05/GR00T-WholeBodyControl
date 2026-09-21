@@ -42,6 +42,7 @@ except ImportError:
     sys.exit(1)
 
 import glob
+import json
 import logging
 import os
 from pathlib import Path
@@ -66,6 +67,7 @@ from gear_sonic.trl.utils.common import (
 from gear_sonic.utils.common import seeding
 from gear_sonic.utils.config_utils import register_rl_resolvers
 from gear_sonic.utils.obs_utils import get_group_term_obs_shape
+from gear_sonic.utils.wandb_tracking import init_wandb_online_first
 
 register_rl_resolvers()
 
@@ -203,15 +205,24 @@ def main(config: OmegaConf):
         config.wandb.wandb_id = meta["wandb_run"]
         print(f"resume wandb from run: {config.wandb.wandb_id}")
 
+    is_replay = config.get("replay", False) or config.get("vplanner_replay", False)
+    if not config.use_wandb and not is_replay:
+        raise RuntimeError(
+            "Training curve tracking is mandatory: use_wandb=false is not allowed. "
+            "W&B is online-first and automatically falls back to a persistent offline run."
+        )
+
     unresolved_conf = OmegaConf.to_container(config, resolve=False)
+    wandb_tracking = {"required": not is_replay, "actual_mode": "not-main-process"}
     if config.use_wandb and accelerator.is_main_process:
         project_name = f"{config.project_name}"
-        run_name = config.experiment_dir.replace(f"{config.base_dir}/{project_name}/", "")
+        run_name = f"{config.experiment_name}"
         wandb_dir = Path(config.wandb.wandb_dir)
         wandb_dir.mkdir(exist_ok=True, parents=True)
         wandb_group = None if config.wandb.wandb_id is not None else config.wandb.wandb_group
         logger.info(f"Saving wandb logs to {wandb_dir}")
-        wandb.init(
+        _, wandb_tracking = init_wandb_online_first(
+            wandb,
             project=project_name,
             entity=config.wandb.wandb_entity,
             name=run_name,
@@ -222,6 +233,7 @@ def main(config: OmegaConf):
             group=wandb_group,
             resume="allow",
         )
+        print("WANDB_TRACKING_STATUS " + json.dumps(wandb_tracking, sort_keys=True))
 
     # Setup simulator similar to train_agent.py
 
@@ -309,7 +321,10 @@ def main(config: OmegaConf):
         logger.info(f"Saving config file to {experiment_save_dir}")
         with open(experiment_save_dir / "config.yaml", "w") as file:
             OmegaConf.save(unresolved_conf, file)
-        meta = {"wandb_run": wandb.run.id if wandb_run_exists() else None}
+        meta = {
+            "wandb_run": wandb.run.id if wandb_run_exists() else None,
+            "wandb_tracking": wandb_tracking,
+        }
         meta["max_train_steps"] = config.algo.config.num_learning_iterations
         yaml.safe_dump(meta, open(meta_path, "w"))
         print("saved meta:", meta)

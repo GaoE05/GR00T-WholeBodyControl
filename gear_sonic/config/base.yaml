@@ -34,7 +34,9 @@ save_dir: ${experiment_dir}/.hydra
 
 force_flat_terrain: False
 
-use_wandb: false
+# Training must always retain a curve record. The trainer attempts online W&B
+# first and explicitly falls back to a persistent offline run on connection failure.
+use_wandb: true
 log_task_name: TEST
 
 multi_gpu: False
