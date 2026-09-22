@@ -51,9 +51,9 @@ def motion_lib_config(motion_file: Path) -> EasyDict:
 def validate(motion_file: Path, adaptive_samples: int) -> dict:
     logger.remove()
     lib = MotionLibRobot(
-        motion_lib_config(motion_file), num_envs=10, device=torch.device("cpu")
+        motion_lib_config(motion_file), num_envs=1024, device=torch.device("cpu")
     )
-    lib.load_motions_for_training(max_num_seqs=10)
+    lib.load_motions_for_training(max_num_seqs=lib._num_unique_motions)  # noqa: SLF001
     lib.configure_pre_force_reset(
         window_s=1.0,
         min_lead_s=0.2,
@@ -61,6 +61,7 @@ def validate(motion_file: Path, adaptive_samples: int) -> dict:
         pose_tolerance=1.0e-5,
         velocity_tolerance=1.0e-4,
         field_tolerance=0.0,
+        lead_sampling="earliest",
     )
     initial_index = lib.pre_force_reset_index
     lib.load_motions_for_evaluation(start_idx=0)
@@ -79,8 +80,17 @@ def validate(motion_file: Path, adaptive_samples: int) -> dict:
         torch.repeat_interleave(index.event_starts, counts) - index.candidate_steps
     )
 
-    assert index.total_events == index.num_events == 280
-    assert index.num_candidates == 8366
+    num_motions = int(lib._motion_num_frames.numel())  # noqa: SLF001
+    num_zero_motions = int((~lib.pre_force_motion_has_events).sum())
+    expected = {
+        (10, 0): (280, 8366),
+        (16, 8): (222, 6631),
+    }.get((num_motions, num_zero_motions))
+    assert expected is not None, (num_motions, num_zero_motions)
+    expected_events, expected_candidates = expected
+
+    assert index.total_events == index.num_events == expected_events
+    assert index.num_candidates == expected_candidates
     assert index.rejected_tail_events == 0
     assert index.rejected_no_candidate_events == 0
     assert (field == 0).all()
@@ -89,24 +99,73 @@ def validate(motion_file: Path, adaptive_samples: int) -> dict:
     assert int(leads.min()) == 10 and int(leads.max()) == 50
 
     adaptive_weights = lib._adaptive_pre_force_event_weights()  # noqa: SLF001
-    assert adaptive_weights.shape == (280,)
+    assert adaptive_weights.shape == (expected_events,)
     assert torch.isfinite(adaptive_weights).all() and (adaptive_weights > 0).all()
 
+    # Actual C sampling starts with the exact A motion/time draw.  C must keep
+    # pure-zero rows byte-for-byte while replacing only force timestamps.
     torch.manual_seed(20260921)
+    base_ids = lib.sample_motions(adaptive_samples)
+    base_steps = lib.sample_time_steps(base_ids, truncate_time=None)
     sampled_ids, sampled_steps = lib.sample_pre_force_reset(
-        adaptive_samples, adaptive=True
+        base_ids, base_steps, adaptive=False
     )
-    sampled_pairs = torch.stack([sampled_ids, sampled_steps], dim=1)
-    legal_pairs = torch.stack(
-        [torch.repeat_interleave(index.event_motion_ids, counts), index.candidate_steps],
-        dim=1,
-    )
-    encoding_base = int(lib._motion_num_frames.max()) + 1  # noqa: SLF001
-    sampled_codes = sampled_pairs[:, 0] * encoding_base + sampled_pairs[:, 1]
-    legal_codes = legal_pairs[:, 0] * encoding_base + legal_pairs[:, 1]
-    assert torch.isin(sampled_codes, legal_codes).all()
+    torch.testing.assert_close(sampled_ids, base_ids)
+    sampled_zero = ~lib.pre_force_motion_has_events[sampled_ids]
+    torch.testing.assert_close(sampled_steps[sampled_zero], base_steps[sampled_zero])
 
-    per_motion_candidates = torch.zeros(10, dtype=torch.long).scatter_add_(
+    earliest_steps = index.candidate_steps[index.candidate_offsets[:-1]]
+    earliest_pairs = torch.stack([index.event_motion_ids, earliest_steps], dim=1)
+    encoding_base = int(lib._motion_num_frames.max()) + 1  # noqa: SLF001
+    sampled_force_codes = (
+        sampled_ids[~sampled_zero] * encoding_base + sampled_steps[~sampled_zero]
+    )
+    earliest_codes = earliest_pairs[:, 0] * encoding_base + earliest_pairs[:, 1]
+    assert torch.isin(sampled_force_codes, earliest_codes).all()
+    sampled_event_coverage = int(torch.unique(sampled_force_codes).numel())
+    assert sampled_event_coverage == expected_events
+
+    expected_zero_fraction = float(
+        lib._sampling_batch_prob[~lib.pre_force_motion_has_events].sum()  # noqa: SLF001
+    )
+    sampled_zero_fraction = float(sampled_zero.float().mean())
+    assert abs(sampled_zero_fraction - expected_zero_fraction) < 0.01
+
+    torch.manual_seed(20260922)
+    adaptive_ids, adaptive_base_steps = lib.sample_motion_ids_and_time_steps(10_000)
+    adaptive_c_ids, adaptive_c_steps = lib.sample_pre_force_reset(
+        adaptive_ids, adaptive_base_steps, adaptive=True
+    )
+    torch.testing.assert_close(adaptive_c_ids, adaptive_ids)
+    adaptive_zero = ~lib.pre_force_motion_has_events[adaptive_ids]
+    torch.testing.assert_close(
+        adaptive_c_steps[adaptive_zero], adaptive_base_steps[adaptive_zero]
+    )
+    adaptive_force_codes = (
+        adaptive_c_ids[~adaptive_zero] * encoding_base
+        + adaptive_c_steps[~adaptive_zero]
+    )
+    assert torch.isin(adaptive_force_codes, earliest_codes).all()
+
+    # Quantify the stronger history notion: time until q_aug first ceases to
+    # match q_ref.  The approved earliest policy keeps all events and must
+    # reproduce the 6/222 (2.70%) result on the mixed long-training dataset.
+    strong_stable_steps = []
+    for motion_id, candidate, event_start in zip(
+        index.event_motion_ids.tolist(), earliest_steps.tolist(), index.event_starts.tolist()
+    ):
+        offset = int(lib.length_starts[motion_id])
+        recovered_prefix = lib.pre_force_reset_recovered[
+            offset + candidate : offset + event_start
+        ]
+        lost = torch.nonzero(~recovered_prefix, as_tuple=False).flatten()
+        strong_stable_steps.append(int(lost[0]) if lost.numel() else len(recovered_prefix))
+    strong_stable_steps = torch.tensor(strong_stable_steps)
+    strong_stability_short = int((strong_stable_steps < index.min_lead_steps).sum())
+    if (num_motions, num_zero_motions) == (16, 8):
+        assert strong_stability_short == 6
+
+    per_motion_candidates = torch.zeros(num_motions, dtype=torch.long).scatter_add_(
         0, index.event_motion_ids, counts
     )
     return {
@@ -116,8 +175,8 @@ def validate(motion_file: Path, adaptive_samples: int) -> dict:
         "events_covered": index.num_events,
         "coverage": index.num_events / index.total_events,
         "legal_candidates": index.num_candidates,
-        "expected_candidates": 8366,
-        "candidate_difference": index.num_candidates - 8366,
+        "expected_candidates": expected_candidates,
+        "candidate_difference": index.num_candidates - expected_candidates,
         "window_steps": index.window_steps,
         "min_lead_steps": index.min_lead_steps,
         "min_tail_steps": index.min_tail_steps,
@@ -130,13 +189,27 @@ def validate(motion_file: Path, adaptive_samples: int) -> dict:
         "candidate_pose_error_max": float(pose_error.max()),
         "candidate_velocity_error_max": float(velocity_error.max()),
         "per_motion_events": torch.bincount(
-            index.event_motion_ids, minlength=10
+            index.event_motion_ids, minlength=num_motions
         ).tolist(),
         "per_motion_candidates": per_motion_candidates.tolist(),
         "adaptive_positive_events": int((adaptive_weights > 0).sum()),
         "adaptive_weight_sum": float(adaptive_weights.sum()),
-        "adaptive_sample_count": adaptive_samples,
+        "adaptive_sample_count": 10_000,
         "adaptive_samples_all_legal": True,
+        "adaptive_motion_ids_preserved": True,
+        "adaptive_zero_fallback_steps_preserved": True,
+        "lead_sampling": lib.pre_force_reset_lead_sampling,
+        "sampled_event_coverage": sampled_event_coverage,
+        "num_motions": num_motions,
+        "num_force_motions": int(lib.pre_force_motion_has_events.sum()),
+        "num_zero_motions": num_zero_motions,
+        "expected_zero_fraction": expected_zero_fraction,
+        "sampled_zero_fraction": sampled_zero_fraction,
+        "zero_sample_count": int(sampled_zero.sum()),
+        "zero_fallback_steps_preserved": True,
+        "motion_ids_preserved": True,
+        "strong_stability_short_count": strong_stability_short,
+        "strong_stability_short_fraction": strong_stability_short / expected_events,
         "motion_reload_rebuilt_index": reload_rebuilt_index,
     }
 

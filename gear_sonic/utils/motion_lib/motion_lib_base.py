@@ -736,6 +736,7 @@ class MotionLibBase:
         pose_tolerance,
         velocity_tolerance,
         field_tolerance,
+        lead_sampling,
     ):
         """Build reset-C legality from the loaded, resampled motion buffers.
 
@@ -751,6 +752,7 @@ class MotionLibBase:
             "pose_tolerance": pose_tolerance,
             "velocity_tolerance": velocity_tolerance,
             "field_tolerance": field_tolerance,
+            "lead_sampling": lead_sampling,
         }
 
         for name, value in (
@@ -760,6 +762,11 @@ class MotionLibBase:
         ):
             if value < 0:
                 raise ValueError(f"{name} must be non-negative, got {value}")
+        if lead_sampling not in {"uniform", "earliest"}:
+            raise ValueError(
+                "lead_sampling must be 'uniform' or 'earliest', "
+                f"got {lead_sampling!r}"
+            )
 
         if not self.has_softsonic or not self.has_aug_pose:
             raise RuntimeError(
@@ -779,6 +786,18 @@ class MotionLibBase:
 
         field_stiffness = self._motion_softsonic[:, 7:9]
         active = (field_stiffness.abs() > field_tolerance).any(dim=1)
+        motion_has_force_events = []
+        frame_offset = 0
+        for num_frames_tensor in self._motion_num_frames:
+            num_frames = int(num_frames_tensor)
+            motion_has_force_events.append(
+                bool(active[frame_offset : frame_offset + num_frames].any())
+            )
+            frame_offset += num_frames
+        self.pre_force_motion_has_events = torch.tensor(
+            motion_has_force_events, dtype=torch.bool, device=self._device
+        )
+        self.pre_force_reset_lead_sampling = lead_sampling
 
         root_pos_error = (self.body_pos_w[:, 0] - self.body_pos_w_aug[:, 0]).abs().amax(dim=1)
         root_quat = self.body_quat_w[:, 0]
@@ -816,6 +835,7 @@ class MotionLibBase:
         )
         self.pre_force_reset_pose_error = pose_error
         self.pre_force_reset_velocity_error = velocity_error
+        self.pre_force_reset_recovered = recovered
         index = self.pre_force_reset_index
         logger.info(
             "Reset C: {} legal starts across {}/{} force events at {} Hz "
@@ -827,8 +847,17 @@ class MotionLibBase:
             index.rejected_tail_events,
             index.rejected_no_candidate_events,
         )
-        if index.num_events == 0:
-            raise RuntimeError("reset C found no legal pre-force event in the loaded motion batch")
+        indexed_motion = torch.zeros_like(self.pre_force_motion_has_events)
+        if index.num_events > 0:
+            indexed_motion[index.event_motion_ids.unique()] = True
+        missing_force_motions = torch.nonzero(
+            self.pre_force_motion_has_events & ~indexed_motion, as_tuple=False
+        ).flatten()
+        if missing_force_motions.numel() > 0:
+            raise RuntimeError(
+                "reset C cannot preserve motion sampling weights because force motions "
+                f"{missing_force_motions.detach().cpu().tolist()} have no legal event"
+            )
 
     def _adaptive_pre_force_event_weights(self):
         """Project current adaptive frame-bin probabilities onto reset-C events."""
@@ -866,15 +895,38 @@ class MotionLibBase:
             torch.cat(bin_weights),
         )
 
-    def sample_pre_force_reset(self, n, *, motion_ids=None, adaptive=False):
-        """Sample reset-C motion/event pairs without snapping arbitrary frames."""
+    def sample_pre_force_reset(
+        self, motion_ids, fallback_time_steps, *, adaptive=False
+    ):
+        """Apply reset C only inside already-selected force motions.
+
+        Motion IDs and fallback timestamps must first be sampled by the normal
+        A-policy path.  Pure-zero motions retain both values exactly; only force
+        motions replace the timestamp with a legal pre-event start.  This keeps
+        file-level sampling weights identical to A and prevents event count from
+        silently reweighting the dataset.
+        """
         if not hasattr(self, "pre_force_reset_index"):
             raise RuntimeError("configure_pre_force_reset() must run before sampling reset C")
-        event_weights = self._adaptive_pre_force_event_weights() if adaptive else None
-        sampled_motion_ids, sampled_steps, _ = self.pre_force_reset_index.sample(
-            n, motion_ids=motion_ids, event_weights=event_weights
-        )
-        return sampled_motion_ids, sampled_steps.int()
+        motion_ids = motion_ids.to(device=self._device, dtype=torch.long)
+        fallback_time_steps = fallback_time_steps.to(device=self._device)
+        if motion_ids.ndim != 1 or fallback_time_steps.shape != motion_ids.shape:
+            raise ValueError(
+                "motion_ids and fallback_time_steps must be same-length 1-D tensors"
+            )
+
+        sampled_steps = fallback_time_steps.clone()
+        force_rows = self.pre_force_motion_has_events[motion_ids]
+        if force_rows.any():
+            event_weights = self._adaptive_pre_force_event_weights() if adaptive else None
+            _, force_steps, _ = self.pre_force_reset_index.sample(
+                int(force_rows.sum()),
+                motion_ids=motion_ids[force_rows],
+                event_weights=event_weights,
+                lead_sampling=self.pre_force_reset_lead_sampling,
+            )
+            sampled_steps[force_rows] = force_steps.to(sampled_steps.dtype)
+        return motion_ids, sampled_steps.int()
 
     def get_time_step_total(self, motion_ids):
         return self._motion_num_frames[motion_ids]

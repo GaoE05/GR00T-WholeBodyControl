@@ -12,6 +12,9 @@ motion:
   reset_before_force_pose_tolerance: 1.0e-5
   reset_before_force_velocity_tolerance: 1.0e-4
   reset_before_force_field_tolerance: 0.0
+  # earliest maximizes recovered history without losing events; uniform keeps
+  # the original reset-C ablation available.
+  reset_before_force_lead_sampling: earliest
 
   motion_lib_cfg:
     motion_file: ${robot.motion.motion_file}

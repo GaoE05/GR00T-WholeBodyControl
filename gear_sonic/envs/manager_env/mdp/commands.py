@@ -262,6 +262,7 @@ class TrackingCommand(CommandTerm):
                 pose_tolerance=self.cfg.reset_before_force_pose_tolerance,
                 velocity_tolerance=self.cfg.reset_before_force_velocity_tolerance,
                 field_tolerance=self.cfg.reset_before_force_field_tolerance,
+                lead_sampling=self.cfg.reset_before_force_lead_sampling,
             )
         # Isaac Lab resamples terminated environments before _update_command
         # reads the cursor. Keep the pre-physics cursor so failures are charged
@@ -326,16 +327,10 @@ class TrackingCommand(CommandTerm):
             self.motion_ids, truncate_time=None
         )
         if self.reset_before_force_event:
-            fixed_motion_ids = (
-                self.motion_ids
-                if self.cfg.use_paired_motions
-                or getattr(self.cfg, "sample_unique_motions", False)
-                else None
-            )
             self.motion_ids, self.motion_start_time_steps = (
                 self.motion_lib.sample_pre_force_reset(
-                    self.num_envs,
-                    motion_ids=fixed_motion_ids,
+                    self.motion_ids,
+                    self.motion_start_time_steps,
                     adaptive=self.use_adaptive_sampling,
                 )
             )
@@ -816,15 +811,14 @@ class TrackingCommand(CommandTerm):
             torch.arange(self.num_envs).to(self.device)
             % self.motion_lib._num_motions  # noqa: SLF001
         )[env_ids]
+        sampled_times = self.motion_lib.sample_time_steps(
+            self.motion_ids[env_ids], truncate_time=None
+        )
         if self.reset_before_force_event:
             _, sampled_times = self.motion_lib.sample_pre_force_reset(
-                len(env_ids),
-                motion_ids=self.motion_ids[env_ids],
+                self.motion_ids[env_ids],
+                sampled_times,
                 adaptive=self.use_adaptive_sampling,
-            )
-        else:
-            sampled_times = self.motion_lib.sample_time_steps(
-                self.motion_ids[env_ids], truncate_time=None
             )
         if self.cfg.sample_from_n_initial_frames is not None:
             # Sample uniformly from first N frames
@@ -3007,22 +3001,28 @@ class TrackingCommand(CommandTerm):
                     torch.arange(self.num_envs).to(self.device)
                     % self.motion_lib._num_motions  # noqa: SLF001
                 )[env_ids]
+                sampled_times = torch.zeros(
+                    len(env_ids),
+                    dtype=self.motion_start_time_steps.dtype,
+                    device=self.device,
+                )
                 if self.reset_before_force_event:
                     _, sampled_times = self.motion_lib.sample_pre_force_reset(
-                        len(env_ids), motion_ids=self.motion_ids[env_ids], adaptive=False
+                        self.motion_ids[env_ids], sampled_times, adaptive=False
                     )
-                    self.motion_start_time_steps[env_ids] = sampled_times
-                else:
-                    self.motion_start_time_steps[env_ids] = 0
+                self.motion_start_time_steps[env_ids] = sampled_times
             elif self.cfg.use_paired_motions:
                 self.motion_ids[env_ids] = (
                     torch.arange(self.num_envs).to(self.device)
                     % self.motion_lib._num_motions  # noqa: SLF001
                 )[env_ids]
                 if self.reset_before_force_event:
+                    # Paired A resets replay their existing start. Preserve it
+                    # for pure-zero motions and replace only force timestamps.
+                    sampled_times = self.motion_start_time_steps[env_ids].clone()
                     _, sampled_times = self.motion_lib.sample_pre_force_reset(
-                        len(env_ids),
-                        motion_ids=self.motion_ids[env_ids],
+                        self.motion_ids[env_ids],
+                        sampled_times,
                         adaptive=self.use_adaptive_sampling,
                     )
                     self.motion_start_time_steps[env_ids] = sampled_times
@@ -3031,43 +3031,35 @@ class TrackingCommand(CommandTerm):
                 # MULTI-OBJECT MODE: Resetting envs sample a new motion (and corresponding object)
                 # Over time, staggered resets lead to different envs using different objects,
                 # which provides training diversity. Object positioning (below) handles per-env instances.
+                new_motion_id = self.motion_lib.sample_motions(1)[0]
+                self.motion_ids[env_ids] = new_motion_id
+                sampled_times = self.motion_lib.sample_time_steps(
+                    self.motion_ids[env_ids], truncate_time=None
+                )
                 if self.reset_before_force_event:
-                    # Preserve the mode's one-object-per-reset-batch contract,
-                    # but choose that motion through the event distribution so
-                    # clips with longer idle gaps gain no implicit weight.
-                    sampled_motion_ids, _ = self.motion_lib.sample_pre_force_reset(
-                        1, adaptive=self.use_adaptive_sampling
-                    )
-                    self.motion_ids[env_ids] = sampled_motion_ids[0]
                     _, sampled_times = self.motion_lib.sample_pre_force_reset(
-                        len(env_ids),
-                        motion_ids=self.motion_ids[env_ids],
+                        self.motion_ids[env_ids],
+                        sampled_times,
                         adaptive=self.use_adaptive_sampling,
                     )
-                    self.motion_start_time_steps[env_ids] = sampled_times
-                else:
-                    new_motion_id = self.motion_lib.sample_motions(1)[0]
-                    self.motion_ids[env_ids] = new_motion_id
-                    self.motion_start_time_steps[env_ids] = self.motion_lib.sample_time_steps(
-                        self.motion_ids[env_ids], truncate_time=None
-                    )
+                self.motion_start_time_steps[env_ids] = sampled_times
             else:
-                if self.reset_before_force_event:
-                    sampled_ids, sampled_times = self.motion_lib.sample_pre_force_reset(
-                        len(env_ids), adaptive=self.use_adaptive_sampling
-                    )
-                    self.motion_ids[env_ids] = sampled_ids.to(self.motion_ids.dtype)
-                    sampled_times = sampled_times.to(self.motion_start_time_steps.dtype)
-                elif self.use_adaptive_sampling:
+                if self.use_adaptive_sampling:
                     sampled_ids, sampled_times = self.motion_lib.sample_motion_ids_and_time_steps(
                         len(env_ids)
                     )
                     self.motion_ids[env_ids] = sampled_ids.to(self.motion_ids.dtype)
-                    sampled_times = sampled_times.to(self.motion_start_time_steps.dtype)
                 else:
                     self.motion_ids[env_ids] = self.motion_lib.sample_motions(len(env_ids))
                     sampled_times = self.motion_lib.sample_time_steps(
                         self.motion_ids[env_ids], truncate_time=None
+                    )
+                sampled_times = sampled_times.to(self.motion_start_time_steps.dtype)
+                if self.reset_before_force_event:
+                    _, sampled_times = self.motion_lib.sample_pre_force_reset(
+                        self.motion_ids[env_ids],
+                        sampled_times,
+                        adaptive=self.use_adaptive_sampling,
                     )
 
                 # Override to sample from initial frames if configured
@@ -4294,6 +4286,7 @@ class TrackingCommandCfg(CommandTermCfg):
     reset_before_force_pose_tolerance: float = 1.0e-5
     reset_before_force_velocity_tolerance: float = 1.0e-4
     reset_before_force_field_tolerance: float = 0.0
+    reset_before_force_lead_sampling: str = "earliest"
 
     class_type: type = TrackingCommand
 

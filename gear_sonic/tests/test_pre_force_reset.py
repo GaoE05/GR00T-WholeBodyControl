@@ -82,6 +82,27 @@ def test_event_first_sampling_does_not_weight_longer_gaps():
     assert ((steps[events == 0]) == 0).all()
 
 
+def test_earliest_sampling_uses_first_legal_candidate_per_event():
+    active = torch.zeros(180, dtype=torch.bool)
+    active[10:20] = True
+    active[120:130] = True
+    index = make_index(active)
+    requested = torch.tensor([0, 0])
+    torch.manual_seed(11)
+    _, steps, events = index.sample(
+        2, motion_ids=requested, lead_sampling="earliest"
+    )
+    expected = index.candidate_steps[index.candidate_offsets[events]]
+    torch.testing.assert_close(steps, expected)
+
+    try:
+        index.sample(1, lead_sampling="latest")
+    except ValueError as exc:
+        assert "uniform" in str(exc) and "earliest" in str(exc)
+    else:
+        raise AssertionError("invalid lead_sampling must be rejected")
+
+
 def test_conditioned_sampling_and_adaptive_projection():
     active = torch.zeros(240, dtype=torch.bool)
     active[20:30] = True
@@ -119,15 +140,20 @@ def test_all_command_sampling_entry_points_use_reset_c_sampler():
         / "envs/manager_env/mdp/commands.py"
     ).read_text()
     # configure + initial assignment + forward_motion_samples + evaluating +
-    # paired + multi-object event/motion choice + multi-object lead + ordinary reset.
-    assert source.count("sample_pre_force_reset(") == 7
+    # paired + multi-object + ordinary reset.
+    assert source.count("sample_pre_force_reset(") == 6
     assert "configure_pre_force_reset(" in source
+    assert "self.motion_ids,\n                    self.motion_start_time_steps" in source
+    assert "sampled_times = torch.zeros(" in source
+    assert "new_motion_id = self.motion_lib.sample_motions(1)[0]" in source
     motion_lib_source = (
         Path(__file__).resolve().parents[1]
         / "utils/motion_lib/motion_lib_base.py"
     ).read_text()
     assert "field_stiffness = self._motion_softsonic[:, 7:9]" in motion_lib_source
     assert 'hasattr(self, "_pre_force_reset_config")' in motion_lib_source
+    assert "Pure-zero motions retain both values exactly" in motion_lib_source
+    assert 'lead_sampling: str = "earliest"' in source
 
 
 

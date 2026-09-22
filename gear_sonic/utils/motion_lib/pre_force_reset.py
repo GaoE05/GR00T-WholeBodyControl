@@ -46,6 +46,7 @@ class PreForceResetIndex:
         *,
         motion_ids: torch.Tensor | None = None,
         event_weights: torch.Tensor | None = None,
+        lead_sampling: str = "uniform",
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Sample an event first, then a legal lead uniformly within it.
 
@@ -56,6 +57,11 @@ class PreForceResetIndex:
         """
         if num_samples < 0:
             raise ValueError(f"num_samples must be non-negative, got {num_samples}")
+        if lead_sampling not in {"uniform", "earliest"}:
+            raise ValueError(
+                "lead_sampling must be 'uniform' or 'earliest', "
+                f"got {lead_sampling!r}"
+            )
         device = self.event_motion_ids.device
         if num_samples == 0:
             empty = torch.empty(0, dtype=torch.long, device=device)
@@ -108,7 +114,15 @@ class PreForceResetIndex:
 
         starts = self.candidate_offsets[chosen_events]
         counts = self.candidate_offsets[chosen_events + 1] - starts
-        candidate_rows = starts + (torch.rand(num_samples, device=device) * counts).floor().long()
+        if lead_sampling == "earliest":
+            # Candidate steps are stored in ascending time order, so the first
+            # candidate gives the longest recovered/no-field history available
+            # inside the configured window.
+            candidate_rows = starts
+        else:
+            candidate_rows = starts + (
+                torch.rand(num_samples, device=device) * counts
+            ).floor().long()
         sampled_steps = self.candidate_steps[candidate_rows]
         sampled_motion_ids = self.event_motion_ids[chosen_events]
         return sampled_motion_ids, sampled_steps, chosen_events
