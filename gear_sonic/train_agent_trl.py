@@ -73,6 +73,14 @@ register_rl_resolvers()
 
 
 def resume_training(config):
+    if config.get("resume_into_new_experiment_dir", False):
+        checkpoint = config.get("checkpoint", None)
+        if not checkpoint or not os.path.isfile(checkpoint):
+            raise ValueError("resume_into_new_experiment_dir requires an existing explicit checkpoint")
+        if os.path.abspath(config.experiment_dir) == os.path.dirname(os.path.abspath(checkpoint)):
+            raise ValueError("resume_into_new_experiment_dir must not overwrite checkpoint directory")
+        print(f"Fork-resuming from {checkpoint} into {config.experiment_dir}")
+        return
     if config.get("checkpoint", None) is not None:
         last_existing_checkpoint = config.checkpoint
     elif config.get("experiment_dir", None) is not None:

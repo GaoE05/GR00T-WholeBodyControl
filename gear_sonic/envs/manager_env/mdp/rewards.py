@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from isaaclab.managers import SceneEntityCfg
@@ -68,6 +70,7 @@ class RewardsCfg:
     alive = None
     # SoftSONIC：latent residual 的幅值惩罚（见函数 docstring 的依据）
     latent_residual_l2 = None
+    latent_residual_l2_pure_zero = None
     # SoftSONIC：关节空间的 q_aug 跟踪（对照 SoftMimic 的
     # joint_deviation_upper_body_commanded，权重 2.0）
     tracking_compliant_joint_pos = None
@@ -1026,6 +1029,42 @@ def latent_residual_l2(env: ManagerBasedRLEnv) -> torch.Tensor:
     if residual is None:
         return torch.zeros(env.num_envs, device=env.device)
     return torch.sum(torch.square(residual), dim=-1)
+
+
+def latent_residual_l2_pure_zero(
+    env: ManagerBasedRLEnv, data_labels_path: str, command_name: str = "motion"
+) -> torch.Tensor:
+    """Penalize applied scaled/clipped residual only for pure-zero files.
+
+    The published labels define the cohort, never a per-frame force-active flag.
+    Loaded-batch IDs are mapped through current MotionLib keys after resampling.
+    """
+    command = env.command_manager.get_term(command_name)
+    keys = command.motion_lib.curr_motion_keys
+    labels_path = str(data_labels_path)
+    cache = getattr(env, "_softsonic_zero_cohort_cache", None)
+    if cache is None or cache[0] != labels_path or cache[1] is not keys:
+        labels = json.loads(Path(data_labels_path).read_text())
+        missing = set(keys) - set(labels)
+        if missing:
+            raise ValueError(f"Missing cohort labels for loaded motions: {sorted(missing)}")
+        if any(labels[key] not in ("force", "zero") for key in keys):
+            raise ValueError("Cohort labels must be 'force' or 'zero'")
+        lookup = torch.tensor(
+            [labels[key] == "zero" for key in keys], dtype=torch.bool, device=env.device
+        )
+        # Keep the batch list alive; identity changes on MotionLib reload.
+        # Avoid copying thousands of keys every reward step.
+        cache = (labels_path, keys, lookup)
+        env._softsonic_zero_cohort_cache = cache
+    motion_ids = command.motion_ids.to(dtype=torch.long)
+    if motion_ids.numel() != env.num_envs:
+        raise ValueError("Invalid loaded-batch motion ids for pure-zero reward")
+    torch._assert_async(torch.all((motion_ids >= 0) & (motion_ids < len(keys))), "Invalid motion ids")
+    residual = getattr(env, "_softsonic_residual", None)
+    if residual is None or residual.shape != (env.num_envs, 64):
+        raise ValueError("Applied 64-D latent residual is unavailable")
+    return latent_residual_l2(env) * cache[2][motion_ids]
 
 
 def tracking_compliant_joint_pos_error(

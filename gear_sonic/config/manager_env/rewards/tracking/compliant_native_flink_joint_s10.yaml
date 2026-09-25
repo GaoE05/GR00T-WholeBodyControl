@@ -61,6 +61,7 @@ defaults:
   - terms/tracking_body_linvel@_here_
   - terms/tracking_body_angvel@_here_
   - terms/action_rate_l2@_here_
+  - terms/latent_residual_l2_pure_zero@_here_
   - terms/joint_limit@_here_
   - terms/undesired_contacts@_here_
   - terms/anti_shake_ang_vel@_here_
