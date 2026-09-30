@@ -2044,6 +2044,11 @@ class TRLPPOTrainer(PPOTrainer):  # noqa: F405
                     "train", start_time, num_tokens=self.state.num_input_tokens_seen
                 )
 
+        # Default-off audit metrics must precede W&B callbacks, regardless of registration order.
+        exposure_audit = getattr(self.env, "_generic_exposure_audit", None)
+        if exposure_audit is not None:
+            logs.update(exposure_audit.log_metrics())
+
         # Sanitize all caller logs at this boundary: rank 0 stores only detached CPU/Python values.
         if self.state.is_world_process_zero:
             output = {}
