@@ -1202,6 +1202,9 @@ class TRLPPOTrainer(PPOTrainer):  # noqa: F405
         }
         if self.use_symmetry:
             rollout_data["next_critic_obs"] = next_critic_obs
+        exposure_audit = getattr(self.env, "_generic_exposure_audit", None)
+        if exposure_audit is not None:
+            exposure_audit.collected(padding_mask, self.use_symmetry)
         return rollout_data
 
     def _get_mb_rollout_data(self, rollout_data, micro_batch_inds):
@@ -1251,6 +1254,9 @@ class TRLPPOTrainer(PPOTrainer):  # noqa: F405
         if self.use_symmetry:
             mb_next_critic_obs = rollout_data["next_critic_obs"][micro_batch_inds]
             mb_rollout_data["mb_next_critic_obs"] = mb_next_critic_obs
+        exposure_audit = getattr(self.env, "_generic_exposure_audit", None)
+        if exposure_audit is not None:
+            exposure_audit.optimized(mb_padding_mask)
         return mb_rollout_data
 
     def _forward_model(self, model, mb_rollout_data):
