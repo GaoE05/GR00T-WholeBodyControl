@@ -1939,6 +1939,11 @@ class TRLPPOTrainer(PPOTrainer):  # noqa: F405
                 break
 
         if self.control.should_training_stop:
+            # Default-off exposure audit must flush the final optimized rollout;
+            # upstream terminal return deliberately skips on_train_end callbacks.
+            exposure_audit = getattr(self.env, "_generic_exposure_audit", None)
+            if exposure_audit is not None:
+                exposure_audit.write(self.state.global_step)
             return
 
         # HF trainer specifics
