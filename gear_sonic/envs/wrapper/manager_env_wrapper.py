@@ -94,6 +94,10 @@ class ManagerEnvWrapper:
 
         # Latent residual mode: policy outputs residual added to token latent space
         self._use_latent_residual = self.config.get("use_latent_residual", False)
+        self._use_joint_residual = self.config.get("use_joint_residual", False)
+        self._joint_residual_scale = float(self.config.get("joint_residual_scale", 1.0))
+        if self._use_joint_residual and not self._use_latent_residual:
+            raise ValueError("joint baseline uses the existing residual ATM path with zero latent")
 
         # Latent residual options (only used when use_latent_residual=True)
         self._latent_residual_mode = self.config.get("latent_residual_mode", "post_quantization")
@@ -819,8 +823,16 @@ class ManagerEnvWrapper:
 
             # Split actions: first tokenizer_action_dim for tokenizer, rest for hands
             tokenizer_action_dim = self.config.get("tokenizer_action_dim")
-            tokenizer_meta_actions = meta_actions[:, :tokenizer_action_dim]
-            hand_actions_raw = meta_actions[:, tokenizer_action_dim:]
+            if self._use_joint_residual:
+                if meta_actions.shape[-1] != 29:
+                    raise ValueError("joint residual requires exactly 29 body actions")
+                tokenizer_meta_actions = torch.zeros(
+                    meta_actions.shape[0], tokenizer_action_dim,
+                    device=meta_actions.device, dtype=meta_actions.dtype)
+                hand_actions_raw = meta_actions[:, 29:]
+            else:
+                tokenizer_meta_actions = meta_actions[:, :tokenizer_action_dim]
+                hand_actions_raw = meta_actions[:, tokenizer_action_dim:]
 
             # Override hand actions with motion data if configured
             if self.config.get("use_motion_hand_actions", False):
@@ -978,6 +990,15 @@ class ManagerEnvWrapper:
                     self.env._full_latent = fl.to(self.env.device)  # noqa: SLF001
 
             body_actions = body_actions[:, -1]  # Take last timestep
+            if self._use_joint_residual:
+                if action_mode != "residual":
+                    raise ValueError("joint residual only supports frozen nominal ATM residual path")
+                joint_delta = meta_actions * self._joint_residual_scale
+                if self.config.get("zero_joint_residual", False):
+                    joint_delta = torch.zeros_like(joint_delta)
+                body_actions = body_actions + joint_delta
+                self.env._softsonic_residual = joint_delta.detach()
+                self.env._softsonic_residual_norm = joint_delta.norm(dim=-1)
 
             if (
                 self._body_joint_indices is not None
