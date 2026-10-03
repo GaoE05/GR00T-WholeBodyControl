@@ -78,6 +78,8 @@ class ManagerEnvWrapper:
 
         # Initialize action transform module from config
         self.action_transform_module = None
+        self._nominal_token_input = bool(self.config.get("nominal_token_input", False))
+        self._nominal_token_cache = None
         self._needs_policy_atm = False  # Default: use policy obs directly
         self._policy_atm_indices = None
 
@@ -188,6 +190,11 @@ class ManagerEnvWrapper:
                 logger.info(
                     f"Loaded action_transform_module checkpoint: {action_transform_module_checkpoint}"
                 )
+
+            if self._nominal_token_input:
+                # Dimension inference/reset precedes trainer callbacks.
+                self.action_transform_module.eval()
+                self.action_transform_module.requires_grad_(False)
 
             # Precompute tokenizer observation indices for meta_action target
             self._tokenizer_obs_indices = self._compute_tokenizer_obs_indices()
@@ -513,9 +520,27 @@ class ManagerEnvWrapper:
                     )
                 else:
                     new_obs[k] = v
+        if self._nominal_token_input:
+            if self.action_transform_module is None or new_obs["actor_obs"].shape[-1] != 930:
+                raise RuntimeError("nominal64 requires frozen ATM and legacy930")
+            if self._use_student_direct_latent or self._latent_residual_mode != "post_quantization":
+                raise RuntimeError("nominal64 supports frozen post-FSQ residual only")
+            # No observation-manager/noise/history reevaluation. Preserve original prefix.
+            atm_obs = new_obs.copy()
+            if self._use_policy_atm_group:
+                atm_obs["actor_obs"] = atm_obs["policy_atm"]
+            atm_obs = {k: v.unsqueeze(1) if isinstance(v, torch.Tensor) and v.dim() == 2 else v
+                       for k, v in atm_obs.items()}
+            self._nominal_token_cache = self.action_transform_module.actor_module.preencode_nominal(atm_obs)
+            flat = self._nominal_token_cache["all_tokens"].reshape(self.num_envs, -1)
+            if flat.shape[-1] != 64:
+                raise RuntimeError("nominal64 sequence shape mismatch")
+            # Existing FSQ channels are dimensionless: fixed identity, no token RMS.
+            new_obs["actor_obs"] = torch.cat([new_obs["actor_obs"], flat], dim=-1)
         return new_obs
 
     def reset(self, flatten_dict_obs=True):
+        self._nominal_token_cache = None
         obs, info = self.env.reset()
         new_obs = self.process_raw_obs(obs, flatten_dict_obs)
         # Initialize success_lift to False for all envs after reset (used unconditionally in step())
@@ -819,6 +844,10 @@ class ManagerEnvWrapper:
             # Store meta action for observation (last policy output)
             self.env._last_meta_action = meta_actions.clone()  # noqa: SLF001
 
+            if self._nominal_token_input:
+                if action_mode != "residual" or self._nominal_token_cache is None:
+                    raise RuntimeError("nominal cache missing/consumed or unsupported action mode")
+                obs_dict["actor_obs"] = obs_dict["actor_obs"][..., :930]
             atm_obs_dict = self._prepare_obs_for_action_transform_module(obs_dict)
 
             # Split actions: first tokenizer_action_dim for tokenizer, rest for hands
@@ -882,7 +911,10 @@ class ManagerEnvWrapper:
                     atm_obs_dict,
                     latent_residual=scaled_residual,
                     latent_residual_mode=self._latent_residual_mode,
+                    **({"nominal_token_cache": self._nominal_token_cache} if self._nominal_token_input else {}),
                 )
+                if self._nominal_token_input:
+                    self._nominal_token_cache = None
 
             elif action_mode == "mixed":
                 # Mixed rollout: some envs use teacher (residual), some use student (direct_latent)

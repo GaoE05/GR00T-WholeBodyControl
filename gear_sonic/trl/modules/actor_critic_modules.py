@@ -44,6 +44,8 @@ class Actor(nn.Module):
         has_aux_loss=False,
         output_original_obs_dict=False,
         backbone_kwargs={},
+        nominal_token_input=False,
+        freeze_input_rms=False,
     ):
         """Initialize the Actor.
 
@@ -74,6 +76,13 @@ class Actor(nn.Module):
         self.env_config = env_config
         if obs_dim_dict is None:
             obs_dim_dict = env_config.robot.algo_obs_dim_dict
+        self.nominal_token_input = bool(nominal_token_input)
+        self.freeze_input_rms = bool(freeze_input_rms)
+        if self.nominal_token_input:
+            obs_dim_dict = deepcopy(obs_dim_dict)
+            if obs_dim_dict[input_key] != 994:
+                raise ValueError("nominal64 requires 930 legacy + 64 token inputs")
+            obs_dim_dict[input_key] = 930
         self.input_key = input_key
         self.input_obs_dict = input_obs_dict
         self.has_aux_loss = has_aux_loss
@@ -90,6 +99,13 @@ class Actor(nn.Module):
             _resolve=False,
             **backbone_kwargs,
         )
+        self.nominal_token_projection = None
+        if self.nominal_token_input:
+            first = self.actor_module.module[0]
+            if not isinstance(first, nn.Linear) or first.in_features != 930 or first.out_features != 512:
+                raise ValueError("nominal64 supports audited legacy930 MLP first hidden512 only")
+            # torch.zeros consumes no RNG; no bias, no new running statistics.
+            self.nominal_token_projection = nn.Parameter(torch.zeros(512, 64))
         self.use_batch_norm = use_batch_norm
 
         self.use_running_mean_std = running_mean_std
@@ -257,7 +273,16 @@ class Actor(nn.Module):
             ``(batch, seq, act_dim)`` for temporal models.
         """
         obs_dict = obs_dict.copy()
+        nominal_tokens = None
+        if self.nominal_token_input:
+            combined = obs_dict[self.input_key]
+            if combined.shape[-1] != 994:
+                raise ValueError("nominal64 observation schema mismatch")
+            nominal_tokens = combined[..., 930:]
+            obs_dict[self.input_key] = combined[..., :930]
         if self.running_mean_std is not None:
+            if self.freeze_input_rms:
+                self.running_mean_std.eval()
             if self.use_batch_norm:
                 obs_dict[self.input_key] = self.running_mean_std(obs_dict[self.input_key])
             else:
@@ -270,6 +295,8 @@ class Actor(nn.Module):
             else:
                 net_input = obs_dict[self.input_key]
             net_kwargs = kwargs.copy()
+            if nominal_tokens is not None:
+                net_kwargs.update(nominal_tokens=nominal_tokens, nominal_projection=self.nominal_token_projection)
             if self.has_aux_loss and is_training:
                 net_kwargs["compute_aux_loss"] = True
             output = self.actor_module(net_input, **net_kwargs)

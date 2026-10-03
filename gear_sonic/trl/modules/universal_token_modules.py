@@ -748,6 +748,24 @@ class UniversalTokenModule(nn.Module):
 
         return output_dict
 
+    @torch.no_grad()
+    def preencode_nominal(self, input_data):
+        """Encode supplied current observation once; no obs/noise/history calls."""
+        if self.training:
+            raise RuntimeError("nominal preencode requires frozen eval ATM")
+        batch_size, seq_len = input_data["actor_obs"].shape[:2]
+        tokenizer_obs = self.parse_tokenizer_obs(input_data)
+        frame_mask, _ = self._create_frame_and_token_masks(tokenizer_obs)
+        masks = self.create_encoder_masks(tokenizer_obs)
+        tokens, latents = {}, {}
+        for name in self.encoders_to_iterate:
+            tokens[name], latents[name] = self.encode(name, tokenizer_obs, masks[name], frame_mask=frame_mask)
+        all_tokens = self.assemble_all_tokens(tokens, masks, batch_size, seq_len)
+        if all_tokens.shape[-2] * all_tokens.shape[-1] != 64:
+            raise ValueError("nominal input requires 64 FSQ channels")
+        return {"tokens": tokens, "latents": latents, "all_tokens": all_tokens,
+                "tokenizer_input": input_data["tokenizer"].detach().clone()}
+
     def forward(  # noqa: D417
         self,
         input_data,
@@ -755,6 +773,7 @@ class UniversalTokenModule(nn.Module):
         return_dict=False,
         latent_residual=None,
         latent_residual_mode="post_quantization",
+        nominal_token_cache=None,
         **kwargs,  # noqa: ARG002
     ):
         """Run the full encode → quantize → decode pipeline.
@@ -829,7 +848,14 @@ class UniversalTokenModule(nn.Module):
         encoder_masks = self.create_encoder_masks(tokenizer_obs)
         encoded_tokens = {}
         encoded_latents = {}
-        if latent_residual is not None and latent_residual_mode in [
+        if nominal_token_cache is not None:
+            if self.training or latent_residual_mode != "post_quantization" or compute_aux_loss:
+                raise RuntimeError("cache supports frozen post-FSQ residual only")
+            if not torch.equal(input_data["tokenizer"], nominal_token_cache["tokenizer_input"]):
+                raise RuntimeError("stale nominal cache / observation tick mismatch")
+            encoded_tokens = nominal_token_cache["tokens"]
+            encoded_latents = nominal_token_cache["latents"]
+        elif latent_residual is not None and latent_residual_mode in [
             "pre_quantization",
             "pre_quantization_replace",
         ]:

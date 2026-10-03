@@ -567,7 +567,16 @@ class BaseModule(nn.Module):
             input = input[input_obs_key]
         if self.num_input_temporal_dims is not None:
             input = input.view(*input.shape[:-2], self.input_dim)
-        output = self.module(input)
+        if "nominal_tokens" in kwargs:
+            tokens = kwargs["nominal_tokens"]
+            projection = kwargs["nominal_projection"]
+            if self.num_input_temporal_dims is not None or self.num_output_temporal_dims is not None:
+                raise ValueError("nominal64 supports existing flat MLP only")
+            output = self.module[0](input) + nn.functional.linear(tokens, projection)
+            for layer in list(self.module)[1:]:
+                output = layer(output)
+        else:
+            output = self.module(input)
         if self.num_output_temporal_dims is not None:
             output = output.view(
                 *output.shape[:-1],
