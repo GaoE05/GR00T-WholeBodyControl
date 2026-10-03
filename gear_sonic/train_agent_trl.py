@@ -387,6 +387,11 @@ def main(config: OmegaConf):
             "critic"
         ].shape[-1]
         example_obs = env.reset(flatten_dict_obs=False)
+        if config.manager_env.config.get("nominal_token_input", False):
+            # Wrapper appends current FSQ64; raw manager policy remains legacy930.
+            if example_obs["actor_obs"].shape[-1] != 994:
+                raise ValueError("nominal64 wrapped dimension inference expected 994")
+            env.config["robot"]["algo_obs_dim_dict"]["actor_obs"] = 994
         for key in env.env.observation_space:
             if key not in ["policy", "critic"]:
                 group_obs_dims, group_obs_names, group_obs_total_dim = get_group_term_obs_shape(

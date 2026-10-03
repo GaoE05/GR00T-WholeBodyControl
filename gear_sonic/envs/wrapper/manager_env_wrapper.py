@@ -527,6 +527,13 @@ class ManagerEnvWrapper:
                 raise RuntimeError("nominal64 supports frozen post-FSQ residual only")
             # No observation-manager/noise/history reevaluation. Preserve original prefix.
             atm_obs = new_obs.copy()
+            # Shape inference asks for nested public groups. Flatten a private ATM
+            # view in manager's existing term order, without recomputing observations.
+            for key in ("tokenizer", "policy_atm"):
+                if isinstance(atm_obs.get(key), dict):
+                    names = self.env.observation_manager._group_obs_term_names[key]
+                    atm_obs[key] = torch.cat([atm_obs[key][name].reshape(self.num_envs, -1)
+                                              for name in names], dim=-1)
             if self._use_policy_atm_group:
                 atm_obs["actor_obs"] = atm_obs["policy_atm"]
             atm_obs = {k: v.unsqueeze(1) if isinstance(v, torch.Tensor) and v.dim() == 2 else v
