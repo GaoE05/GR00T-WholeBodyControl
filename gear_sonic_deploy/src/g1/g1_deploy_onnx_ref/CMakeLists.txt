@@ -259,3 +259,34 @@ set_target_properties(
              CXX_STANDARD 20
              CXX_STANDARD_REQUIRED ON
              CXX_EXTENSIONS OFF)
+# BEGIN SOFTSONIC INDEPENDENT TARGET
+# The upstream glob must not compile the second main() into its shared library.
+get_target_property(_softsonic_shared_sources g1_deploy_shared SOURCES)
+list(REMOVE_ITEM _softsonic_shared_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/g1_deploy_softsonic.cpp)
+list(REMOVE_ITEM _softsonic_shared_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/softsonic_backend_check.cpp)
+set_property(TARGET g1_deploy_shared PROPERTY SOURCES ${_softsonic_shared_sources})
+add_executable(g1_deploy_softsonic ${CMAKE_CURRENT_SOURCE_DIR}/src/g1_deploy_softsonic.cpp)
+target_include_directories(g1_deploy_softsonic PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/src)
+target_link_directories(g1_deploy_softsonic PRIVATE ${CUDA_LINK_DIRS})
+target_link_libraries(g1_deploy_softsonic PRIVATE ${PROJECT_NAME} ${EXE_LIBS})
+# Keep finite-value checks valid despite SONIC's global -ffast-math.
+target_compile_options(g1_deploy_softsonic PRIVATE -fno-fast-math)
+set_target_properties(g1_deploy_softsonic PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/target/release/"
+  CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+if(rclcpp_FOUND AND std_msgs_FOUND)
+  target_include_directories(g1_deploy_softsonic PRIVATE ${ROS2_INCLUDE_DIRS} ${MSGPACK_INCLUDE_DIRS})
+  target_link_libraries(g1_deploy_softsonic PRIVATE ${ROS2_LIBS} pthread)
+  target_compile_definitions(g1_deploy_softsonic PRIVATE HAS_ROS2=1)
+else()
+  target_compile_definitions(g1_deploy_softsonic PRIVATE HAS_ROS2=0)
+endif()
+add_executable(g1_softsonic_check ${CMAKE_CURRENT_SOURCE_DIR}/src/softsonic_backend_check.cpp)
+target_include_directories(g1_softsonic_check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/src)
+target_link_directories(g1_softsonic_check PRIVATE ${CUDA_LINK_DIRS})
+target_link_libraries(g1_softsonic_check PRIVATE ${PROJECT_NAME} ${EXE_LIBS})
+target_compile_options(g1_softsonic_check PRIVATE -fno-fast-math)
+set_target_properties(g1_softsonic_check PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/target/release/"
+  CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+# END SOFTSONIC INDEPENDENT TARGET
