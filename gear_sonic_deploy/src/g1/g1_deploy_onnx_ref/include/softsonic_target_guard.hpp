@@ -9,6 +9,7 @@
 #include <deque>
 #include <fstream>
 #include <iomanip>
+#include <iostream>
 #include <map>
 #include <mutex>
 #include <sstream>
@@ -123,32 +124,43 @@ class GuardTelemetry {
  struct Row {GuardCommand command; GuardStage stage; std::uint64_t sequence; bool sent; GuardViolation violation;
   std::int64_t steady_ns=std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();};
  GuardTelemetry(const std::string& path,const JointLimits& limits):limits_(limits),file_(path) {
-  if(!file_) throw std::runtime_error("--target-trace required: cannot open direct target telemetry before DDS");
+  if(!file_) { WarnUnavailable(); return; }
   file_<<"sequence,stage,sent,fault,index,name,q_target_rad,dq_target_rad_s,tau_ff,kp,kd,lower_rad,upper_rad,reason,dropped_rows,steady_ns\n";
-  file_.flush(); if(!file_) throw std::runtime_error("target telemetry write failed before DDS");
+  file_.flush(); if(!file_) { WarnUnavailable(); return; }
   worker_=std::thread([this]{Run();});
  }
  ~GuardTelemetry(){ {std::lock_guard<std::mutex> lock(queue_mutex_); stop_=true;} cv_.notify_one(); if(worker_.joinable())worker_.join(); }
  void Push(const Row& row) {
+  if(Failed()) { dropped_.fetch_add(29); return; }
   std::unique_lock<std::mutex> lock(queue_mutex_,std::try_to_lock);
   if(!lock || queue_.size()>=256) {dropped_.fetch_add(29);return;}
   queue_.push_back(row); lock.unlock(); cv_.notify_one();
  }
  // Called once under command transaction lock; this is memory-only, no disk I/O.
  void Fault(const Row& row) {
+  if(Failed()) {
+   std::cerr<<"[SoftSONIC TARGET FAULT] trace unavailable; reason="<<row.violation.reason
+            <<" index="<<row.violation.index<<std::endl;
+   return;
+  }
   std::lock_guard<std::mutex> lock(queue_mutex_); fault_=row; has_fault_=true; cv_.notify_one();
  }
  std::uint64_t Dropped() const{return dropped_.load();}
  bool Failed() const{return io_failed_.load();}
  private:
+ void WarnUnavailable() {
+  if(!io_failed_.exchange(true))
+   std::cerr<<"[SoftSONIC WARNING] target telemetry unavailable; motor command validation remains active"<<std::endl;
+ }
  void Write(const Row& row) {
+  if(Failed()) return;
   file_<<std::setprecision(17);
   for(std::size_t i=0;i<29;++i) file_<<row.sequence<<','<<GuardStageName(row.stage)<<','<<row.sent<<','
    <<(row.violation.index>=0)<<','<<i<<','<<kHardwareJointNames[i]<<','<<row.command.q_target[i]<<','
    <<row.command.dq_target[i]<<','<<row.command.tau_ff[i]<<','<<row.command.kp[i]<<','<<row.command.kd[i]<<','
    <<limits_.lower[i]<<','<<limits_.upper[i]<<','<<(row.violation.index==static_cast<int>(i)?row.violation.reason:"")<<','<<dropped_.load()<<','<<row.steady_ns<<'\n';
   if(row.violation.index>=0) file_.flush();
-  if(!file_) io_failed_.store(true);
+  if(!file_) WarnUnavailable();
  }
  void Run() {
   for(;;) {
@@ -178,7 +190,7 @@ class TargetGuard {
   if(faulted_.load()) return false;
   ++sequence_;
   const auto c=GuardCopy(command);
-  const auto fault=telemetry_.Failed()?GuardViolation{0,"target_telemetry_io_failed"}:ValidateTarget(c,bounds_,false);
+  const auto fault=ValidateTarget(c,bounds_,false);
   if(fault.index>=0) {faulted_.store(true); damped(); telemetry_.Fault({c,stage,sequence_,false,fault});return false;}
   stage_=stage;accepted();telemetry_.Push({c,stage,sequence_,false,{}});return true;
  }
@@ -187,7 +199,7 @@ class TargetGuard {
   std::lock_guard<std::mutex> lock(transaction_);
   auto command=get(); if(!command && !faulted_.load()) return;
   GuardCommand c=command?GuardCopy(*command):GuardDamping();
-  auto fault=telemetry_.Failed()?GuardViolation{0,"target_telemetry_io_failed"}:ValidateTarget(c,bounds_,true);
+  auto fault=ValidateTarget(c,bounds_,true);
   if(fault.index>=0 && !faulted_.load()) {
    faulted_.store(true);damped();
    // Log the rejected exact command; publish damping before requesting disk I/O.
