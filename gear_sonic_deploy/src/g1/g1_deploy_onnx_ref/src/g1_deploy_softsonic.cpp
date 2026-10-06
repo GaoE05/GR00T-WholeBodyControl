@@ -134,6 +134,7 @@
 // Control policy
 #include "../include/control_policy.hpp"
 #include "../include/softsonic_residual.hpp"
+#include "../include/softsonic_target_guard.hpp"
 
 // Dex3 hands
 #include "../include/dex3_hands.hpp"
@@ -350,6 +351,7 @@ class G1Deploy {
     // =========================================================================
     // Encoder engine
     std::string model_path;
+    std::unique_ptr<softsonic::TargetGuard> target_guard_;
     std::unique_ptr<softsonic::ResidualEngine> softsonic_engine_;
     std::unique_ptr<EncoderEngine> encoder_engine_;
     EncoderConfig encoder_config_;  // Encoder configuration from observation config
@@ -2206,6 +2208,16 @@ class G1Deploy {
         //env(ORT_LOGGING_LEVEL_WARNING, "G1Deploy"),
         model_path(model_file_path),
         planner_path(planner_file_path) {
+      // Mandatory binary-level checks, before DDS and MotionSwitcher.
+      auto limits = softsonic::JointLimits::Load(softsonic_config.joint_limits,
+          softsonic_config.target_environment, networkInterface, disable_crc_check);
+      target_guard_ = std::make_unique<softsonic::TargetGuard>(limits, softsonic_config.target_trace);
+      softsonic::GuardCommand default_command;
+      for (int i = 0; i < G1_NUM_MOTOR; ++i) {
+        default_command.q_target[i] = static_cast<float>(default_angles[i]);
+        default_command.kp[i] = kps[i]; default_command.kd[i] = kds[i];
+      }
+      target_guard_->CheckStartup(default_command);
       // Load/validate the residual before opening robot DDS or releasing modes.
       softsonic_engine_ = std::make_unique<softsonic::ResidualEngine>(softsonic_config);
 
@@ -2699,32 +2711,31 @@ class G1Deploy {
      * Also publishes Dex3 hand commands at the same cadence.
      */
     void LowCommandWriter() {
-      LowCmd_ dds_low_command;
-      dds_low_command.mode_pr() = static_cast<uint8_t>(mode_pr_);
-      dds_low_command.mode_machine() = mode_machine_;
-
-      const std::shared_ptr<const MotorCommand> mc = motor_command_buffer_.GetDataWithTime().data;
-      if (mc) {
-        for (size_t i = 0; i < G1_NUM_MOTOR; i++) {
-          dds_low_command.motor_cmd().at(i).mode() = 1; // 1:Enable, 0:Disable
-          dds_low_command.motor_cmd().at(i).tau() = mc->tau_ff.at(i);
-          dds_low_command.motor_cmd().at(i).q() = mc->q_target.at(i);
-          dds_low_command.motor_cmd().at(i).dq() = mc->dq_target.at(i);
-          dds_low_command.motor_cmd().at(i).kp() = mc->kp.at(i);
-          dds_low_command.motor_cmd().at(i).kd() = mc->kd.at(i);
-        }
-
-        dds_low_command.crc() = Crc32Core((uint32_t*)&dds_low_command, (sizeof(dds_low_command) >> 2) - 1);
-        lowcmd_publisher_->Write(dds_low_command);
-      }
-
-      // Publish Dex3 hand commands at the same publish cadence
-      dex3_hands_.writeOnce();
+      target_guard_->PublishLatest(
+        [this] { return motor_command_buffer_.GetDataWithTime().data; },
+        [this](const softsonic::GuardCommand& mc) {
+          LowCmd_ dds_low_command;
+          dds_low_command.mode_pr() = static_cast<uint8_t>(mode_pr_);
+          dds_low_command.mode_machine() = mode_machine_;
+          for (size_t i = 0; i < G1_NUM_MOTOR; ++i) {
+            dds_low_command.motor_cmd().at(i).mode() = 1;
+            dds_low_command.motor_cmd().at(i).tau() = mc.tau_ff[i];
+            dds_low_command.motor_cmd().at(i).q() = mc.q_target[i];
+            dds_low_command.motor_cmd().at(i).dq() = mc.dq_target[i];
+            dds_low_command.motor_cmd().at(i).kp() = mc.kp[i];
+            dds_low_command.motor_cmd().at(i).kd() = mc.kd[i];
+          }
+          dds_low_command.crc() = Crc32Core((uint32_t*)&dds_low_command, (sizeof(dds_low_command) >> 2) - 1);
+          // Serialized with active commits and the irreversible fault latch.
+          lowcmd_publisher_->Write(dds_low_command);
+        }, [this] { StoreDampingCommand(); });
+      if (!target_guard_->Faulted()) dex3_hands_.writeOnce();
     }
 
     /// Gracefully stop all threads and send a damping-only command.
     void Stop() {
       operator_state.stop = true;
+      CreateDampingCommand(); // latch before joining threads or waiting for inference
 
       if (control_thread_ptr_) {
         input_thread_ptr_->Wait();
@@ -2744,7 +2755,14 @@ class G1Deploy {
     }
 
     /// Write a zero-torque, damping-only motor command (safe shutdown pose).
+    bool GuardFaulted() const { return target_guard_ && target_guard_->Faulted(); }
+
     void CreateDampingCommand() {
+      target_guard_->Damp([this] { StoreDampingCommand(); });
+    }
+
+    // Only called inside TargetGuard's transaction; no recursive locking.
+    void StoreDampingCommand() {
       MotorCommand motor_command_tmp;
       const std::shared_ptr<const LowState_> ls = low_state_buffer_.GetDataWithTime().data;
 
@@ -2794,23 +2812,29 @@ class G1Deploy {
         motor_command_tmp.kp.at(i) = kps[i];
         motor_command_tmp.kd.at(i) = kds[i];
       }
-      time_ += control_dt_;
-      if (time_ < duration_) {
-        for (int i = 0; i < G1_NUM_MOTOR; i++) {
-          double ratio = std::clamp(time_ / duration_, 0.0, 1.0);
-          double current_pos = ls->motor_state()[i].q();
-          motor_command_tmp.q_target.at(i) =
-              static_cast<float>(current_pos * (1.0 - ratio) + default_angles[i] * ratio);
-        }
-        dex3_hands_.close(true);
-        dex3_hands_.close(false);
-      } else {
-        program_state_ = ProgramState::WAIT_FOR_CONTROL;
-        dex3_hands_.open(true);
-        dex3_hands_.open(false);
-        std::cout << "Init Done" << std::endl;
+      const double next_time = time_ + control_dt_;
+      if (next_time < duration_) {
+        const double ratio = std::clamp(next_time / duration_, 0.0, 1.0);
+        for (int i = 0; i < G1_NUM_MOTOR; ++i)
+          motor_command_tmp.q_target.at(i) = static_cast<float>(
+            ls->motor_state()[i].q() * (1.0 - ratio) + default_angles[i] * ratio);
       }
-      motor_command_buffer_.SetData(motor_command_tmp);
+      // Validate before committing time/state/hands or any target buffer.
+      if (!target_guard_->Commit(motor_command_tmp, softsonic::GuardStage::Init,
+          [this, &motor_command_tmp, next_time] {
+            motor_command_buffer_.SetData(motor_command_tmp);
+            time_ = next_time;
+            if (time_ < duration_) {
+              dex3_hands_.close(true); dex3_hands_.close(false);
+            } else {
+              program_state_ = ProgramState::WAIT_FOR_CONTROL;
+              dex3_hands_.open(true); dex3_hands_.open(false);
+              std::cout << "Init Done" << std::endl;
+            }
+          }, [this] { StoreDampingCommand(); })) {
+        std::cerr << "[SoftSONIC TARGET FAULT] INIT target rejected; damping latched" << std::endl;
+        operator_state.stop = true; return false;
+      }
       return true;
     }
 
@@ -3187,7 +3211,6 @@ class G1Deploy {
       MotorCommand motor_command_tmp;
       for (int i = 0; i < G1_NUM_MOTOR; i++) {
         const double action_value = static_cast<double>(floatarr[isaaclab_to_mujoco[i]]) * g1_action_scale[i];
-        last_action[i] = static_cast<double>(floatarr[i]);
         motor_command_tmp.q_target.at(i) = static_cast<float>(default_angles[i] + action_value);
         motor_command_tmp.tau_ff.at(i) = 0.0;
         motor_command_tmp.kp.at(i) = kps[i];
@@ -3195,7 +3218,21 @@ class G1Deploy {
         motor_command_tmp.dq_target.at(i) = 0.0;
       }
       apply_motor_gain_scales(motor_gain_scales_, motor_command_tmp);
-      motor_command_buffer_.SetData(motor_command_tmp);
+      softsonic::GuardStage stage;
+      {
+        std::lock_guard<std::mutex> motion_lock(current_motion_mutex_);
+        stage = current_frame_ >= current_motion_->timesteps - 1 ? softsonic::GuardStage::ControlHold
+              : !operator_state.play ? softsonic::GuardStage::ControlPreplay
+              : softsonic::GuardStage::ControlPlay;
+      }
+      if (!target_guard_->Commit(motor_command_tmp, stage,
+          [this, &motor_command_tmp, floatarr] {
+            motor_command_buffer_.SetData(motor_command_tmp);
+            for (int i = 0; i < G1_NUM_MOTOR; ++i) last_action[i] = static_cast<double>(floatarr[i]);
+          }, [this] { StoreDampingCommand(); })) {
+        std::cerr << "[SoftSONIC TARGET FAULT] mapped target rejected; damping latched" << std::endl;
+        operator_state.stop = true; return false;
+      }
       return true;
     }
 
@@ -3865,7 +3902,7 @@ class G1Deploy {
      *    10. Periodic timing log every 50 ticks (~1 s).
      */
     void Control() {
-      if (operator_state.stop) { return; }
+      if (GuardFaulted() || operator_state.stop) { return; }
 
       switch (program_state_) {
         case ProgramState::INIT:
@@ -3881,6 +3918,7 @@ class G1Deploy {
         case ProgramState::WAIT_FOR_CONTROL:
           if (!CheckSafety()) {
             std::cout << "[ERROR] Safety check failed, cannot start control." << std::endl;
+            CreateDampingCommand();
             operator_state.stop = true;
             break;
           }
@@ -4119,6 +4157,7 @@ class G1Deploy {
           }
 
           if (!CurrentFrameAdvancement()) {
+            CreateDampingCommand();
             std::cout << "✗ Error: Failed to advance current frame in the middle of the control loop!" << std::endl;
             std::cout << "Stopping control system." << std::endl;
             operator_state.stop = true;
@@ -4197,6 +4236,10 @@ static bool parse_motor_gain_scale_flag(
  * The main loop sleeps until the operator issues a stop signal or ROS2 shuts down.
  */
 int main(int argc, char const* argv[]) {
+  // Offline binary identity probe must not construct G1Deploy or touch DDS.
+  if (argc == 2 && std::string(argv[1]) == "--softsonic-guard-version") {
+    std::cout << softsonic::kGuardVersion << std::endl; return 0;
+  }
   std::cout << "[DEBUG] Program starting..." << std::endl;
   if (argc < 4) {
     std::cout << "Usage: " << argv[0] << " <network_interface> <policy_file> <motion_data_path> [OPTIONS]"
@@ -4289,7 +4332,14 @@ int main(int argc, char const* argv[]) {
   softsonic::Config softsonic_config;
   for (int i = 4; i < argc; i++) {
     const std::string softsonic_arg(argv[i]);
-    if (softsonic_arg == "--softsonic-model" || softsonic_arg == "--softsonic-mode" ||
+    if (softsonic_arg == "--joint-limits" || softsonic_arg == "--target-trace" ||
+        softsonic_arg == "--target-environment") {
+      if (i + 1 >= argc) { std::cerr << "Missing target guard option value" << std::endl; return 1; }
+      const std::string value(argv[++i]);
+      if (softsonic_arg == "--joint-limits") softsonic_config.joint_limits = value;
+      else if (softsonic_arg == "--target-trace") softsonic_config.target_trace = value;
+      else softsonic_config.target_environment = value;
+    } else if (softsonic_arg == "--softsonic-model" || softsonic_arg == "--softsonic-mode" ||
         softsonic_arg == "--softsonic-gain" || softsonic_arg == "--softsonic-deadline-ms" ||
         softsonic_arg == "--softsonic-trace") {
       if (i + 1 >= argc) { std::cerr << "Missing SoftSONIC option value" << std::endl; return 1; }
@@ -4576,17 +4626,17 @@ int main(int argc, char const* argv[]) {
   // Main application loop - check both operator_state.stop and ROS2 status if using ROS2
 #if HAS_ROS2
   if (inputType == "ros2") {
-    while (!custom.operator_state.stop && rclcpp::ok()) { 
+    while (!custom.GuardFaulted() && !custom.operator_state.stop && rclcpp::ok()) {
       std::this_thread::sleep_for(std::chrono::milliseconds(20)); 
     }
     if (!rclcpp::ok()) {
       std::cout << "[INFO] ROS2 shutdown detected (Ctrl+C)" << std::endl;
     }
   } else {
-    while (!custom.operator_state.stop) { std::this_thread::sleep_for(std::chrono::milliseconds(20)); }
+    while (!custom.GuardFaulted() && !custom.operator_state.stop) { std::this_thread::sleep_for(std::chrono::milliseconds(20)); }
   }
 #else
-  while (!custom.operator_state.stop) { std::this_thread::sleep_for(std::chrono::milliseconds(20)); }
+  while (!custom.GuardFaulted() && !custom.operator_state.stop) { std::this_thread::sleep_for(std::chrono::milliseconds(20)); }
 #endif
   
   std::cout << "[DEBUG] Stopping G1Deploy..." << std::endl;

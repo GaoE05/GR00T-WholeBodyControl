@@ -7,6 +7,9 @@
 
 namespace softsonic {
 struct Config {
+  std::string joint_limits;
+  std::string target_environment = "hardware";
+  std::string target_trace;
   std::string actor;
   std::string mode = "off";
   std::string trace;
