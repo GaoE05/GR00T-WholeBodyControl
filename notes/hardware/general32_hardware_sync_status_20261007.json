@@ -1,0 +1,20 @@
+{
+  "schema": "general32-hardware-report-sync-v1",
+  "repository": "GaoE05/GR00T-WholeBodyControl",
+  "branch": "codex/general32-hardware-results-20261007",
+  "base_remote_commit": "163d7f4cab0585ce16488bf596f2c8ff4a4d9f63",
+  "status": "LOCAL_COMMITTED_NOT_PUBLISHED",
+  "remote_commit": null,
+  "pr_url": null,
+  "failure_evidence": {
+    "git_https": "exit128: could not read Username; terminal prompts disabled; no configured credential helper",
+    "github_integration": "HTTP403 Resource not accessible by integration on Git blob write; account repo push permission true is insufficient for integration content access",
+    "ssh_existing_mux": "Broken pipe; failed to connect to new control master",
+    "ssh_443_fresh": "timeout exit124 after20s, ControlPath=none",
+    "ssh_22": "timeout exit124 after20s"
+  },
+  "repository_visibility_changed": false,
+  "new_robot_tests_started": false,
+  "ordinary_terminal_command": "git -C /home/user/code/ge/SoftSONIC-hardware-results-20261007 push -u origin codex/general32-hardware-results-20261007",
+  "timestamp_utc": "2026-10-07T11:34:38.420768+00:00"
+}
