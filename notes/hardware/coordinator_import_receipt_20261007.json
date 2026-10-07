@@ -1,0 +1,16 @@
+{
+  "source_report_branch": "codex/general32-hardware-results-20261007",
+  "source_report_head": "5153b3396e44de9f6fa697aa71b4aefa57aea346",
+  "source_site_handoff_head": "4c65343d43eced5d5f021cb2978ee929b2f644af",
+  "source_zip_sha256": "6196b3bb1e6cfd507ca46896b0e2ffd314c13e418ac962cc841421aecf95bade",
+  "source_zip_bytes": 322582,
+  "replayed_report_head": "b82c66d07ea6123af12221f128b801fd6df925c7",
+  "replayed_report_tree": "4fcd25c135fda5e5df8aad6cd24f7625f32d4f49",
+  "exact_source_report_tree_equal": true,
+  "site_handoff_patch": "archived unchanged; separate repository/base, not applied",
+  "publication_target": "GaoE05/GR00T-WholeBodyControl",
+  "branch": "codex/general32-hardware-results-20261007",
+  "new_robot_or_gpu_work": false,
+  "review": "36 hardware-config runs, 9 references, 22 on/14 off; actor identity and per-run aggregate count/max consistent. A501/A201 observations qualitative; unknown fields preserved.",
+  "source_status_files": "Historical onsite publication failures remain unchanged; current coordinator publication is recorded in SoftSONIC coordination handoff after successful push."
+}

@@ -1,0 +1,122 @@
+From 4c65343d43eced5d5f021cb2978ee929b2f644af Mon Sep 17 00:00:00 2001
+From: Kinetra-Humanoid <kinetra2026@hotmail.com>
+Date: Wed, 7 Oct 2026 19:44:39 +0800
+Subject: [PATCH] docs: hand off general32 hardware evidence as local report
+ package
+
+---
+ HANDOFF_REPORT.md                             |  9 +++
+ ...ardware_local_report_handoff_20261007.json | 21 +++++++
+ hardware_video_inventory_20261007.txt         | 55 +++++++++++++++++++
+ 3 files changed, 85 insertions(+)
+ create mode 100644 general32_hardware_local_report_handoff_20261007.json
+ create mode 100644 hardware_video_inventory_20261007.txt
+
+diff --git a/HANDOFF_REPORT.md b/HANDOFF_REPORT.md
+index 683fee2..50301a6 100644
+--- a/HANDOFF_REPORT.md
++++ b/HANDOFF_REPORT.md
+@@ -305,3 +305,12 @@ A492为development-unseen；A501/A201为current32-unseen、未来full训练候
+ CPU/native codec `SOFTSONIC_NATIVE_CHECK_PASS`；以当前头文件重编译的native actor golden `GENERAL32_NATIVE_ACTOR_CHECK_PASS`，maxerr3.27826e-7。door off/on三遍仿真均恰好801播放tick（267×3），只有repeat2/3、3/3两次接缝，后有play=false保持末帧；无active reset、无fault/非法writer命令、无阻尼后旧active。完整Control最大off 1.94418ms / on 12.53930ms，均无20ms超期。早期诊断错误地用首个CONTROL_HOLD快照计算总时长；该快照在首次到末帧且play仍true时已记录，现使用完整motion_playing.csv的801行与console接缝/终态记录核验，未为通过而改运行逻辑。两次仿真原日志保留，真机三遍PENDING。
+ 
+ 完整命令 `DOOR_REPEAT3_COMMANDS.txt`；off/on分别重启。Init Done→]→站稳→T，约16.02秒后保持末帧，O退出需支撑。右腕观察：2–3.7、7.34–9.04、12.68–14.38秒，人放手即撤力。仿真on第一遍双侧5N/0.5秒，后两遍看连续播放/接缝；不宣称三遍等力对比或真机PASS。原door单次脚本可直接回退；其余四条仍单次、不自动重新走起始位姿。
++
++
++## 2026-10-07 general32 真实运行结果整理与本地 ZIP 接力
++
++最新结果见 `/home/user/code/ge/SoftSONIC-hardware-results-20261007/notes/hardware/general32_hardware_results_20261007.md` 与逐run CSV/JSON：36次 general32 硬件配置运行，22 on/14 off，覆盖9个reference。本节更新前文历史PENDING状态，不把运行记录等同每项效果PASS。A501/A201各唯一on日志绑定原general32/gain1与current32-unseen exact source，765/840播放tick；操作者报告有些退让，放手恢复/精确外力/手侧方向/物理跌倒/关联真机视频仍unknown。4个已准备但无真机日志的profile继续未确认。原单motion stand/walking用户成功反馈单列基线。
++
++报告分支 `codex/general32-hardware-results-20261007`，源commit `5153b3396e44de9f6fa697aa71b4aefa57aea346`。ZIP `/home/user/code/ge/SoftSONIC_general32_hardware_results_20261007_5153b33.zip`，旁置sha256和generated handoff receipt记录最终校验。包含相关报告patch、轻量报告/结构化结果/身份/原证据位置；不含原始日志、大视频、模型或binary。视频清单55项仅MuJoCo/重复仿真归档，未找到关联真机视频。完整Control已有113,896回调P99 1.087ms/max12.002ms，执行>20ms为0；start interval max25.053ms另列。writer结论限已记录行，有少量诊断丢行，不宣称独立DDS收件证明。
++
++用户最新指示：停止本session的远端发布尝试，不配置GitHub账号，包由用户交协调session同步GaoE05/GR00T-WholeBodyControl；未实际发布GitHub。现场controller d9d9a7f、binary7170662a…及模型/gains/scales/回退均未改，不启动新真机测试。详见 `general32_hardware_local_report_handoff_20261007.json`。
+diff --git a/general32_hardware_local_report_handoff_20261007.json b/general32_hardware_local_report_handoff_20261007.json
+new file mode 100644
+index 0000000..4adcdbf
+--- /dev/null
++++ b/general32_hardware_local_report_handoff_20261007.json
+@@ -0,0 +1,21 @@
++{
++  "schema": "general32-local-report-handoff-v1",
++  "report_branch": "codex/general32-hardware-results-20261007",
++  "report_commit": "5153b3396e44de9f6fa697aa71b4aefa57aea346",
++  "report_checkout": "/home/user/code/ge/SoftSONIC-hardware-results-20261007",
++  "report_path": "/home/user/code/ge/SoftSONIC-hardware-results-20261007/notes/hardware/general32_hardware_results_20261007.md",
++  "zip_path": "/home/user/code/ge/SoftSONIC_general32_hardware_results_20261007_5153b33.zip",
++  "checksum_and_validation_receipt": "general32_hardware_zip_handoff_20261007.json (generated packaging artifact)",
++  "run_count": 36,
++  "profiles": 9,
++  "on": 22,
++  "off": 14,
++  "unseen_on": [
++    "20261007_174302_general32_lift_walk_start_A201_on",
++    "20261007_174626_general32_high_watering_walk_A501_on"
++  ],
++  "conclusion": "A501/A201 current32-unseen on身份有日志绑定，操作者定性报告退让；撤力恢复/外力与逐次物理效果unknown，不补PASS",
++  "git_remote_published": false,
++  "user_instruction": "No more push/account configuration; coordinator syncs after receiving ZIP",
++  "new_robot_tests": false
++}
+diff --git a/hardware_video_inventory_20261007.txt b/hardware_video_inventory_20261007.txt
+new file mode 100644
+index 0000000..934e9b3
+--- /dev/null
++++ b/hardware_video_inventory_20261007.txt
+@@ -0,0 +1,55 @@
++ge/guard_acceptance/evidence/reference_next_20261007/20261007_130403_prepared_general32_button_A480_on/simulation/fullbody_force_until_stop.avi
++ge/guard_acceptance/evidence/reference_next_20261007/20261007_130403_prepared_general32_button_A480_on/simulation/fullbody_force.avi
++ge/guard_acceptance/evidence/repeat3_20261007/door/on/simulation/fullbody_force.avi
++ge/guard_acceptance/evidence/sideway_20261007/20261007_142238_prepared_general32_sideway_A021_on/simulation/fullbody_force.avi
++ge/guard_acceptance/evidence/dynamic_merge_20261007/runs/20261007_162246_prepared_general32_twohand_turn_walk_A508_on/simulation/fullbody_force_until_stop.avi
++ge/guard_acceptance/evidence/dynamic_merge_20261007/runs/20261007_162246_prepared_general32_twohand_turn_walk_A508_on/simulation/fullbody_force.avi
++ge/guard_acceptance/evidence/dynamic_merge_20261007/runs/20261007_162005_prepared_general32_door_open_A508_on/simulation/fullbody_force_until_stop.avi
++ge/guard_acceptance/evidence/dynamic_merge_20261007/runs/20261007_162005_prepared_general32_door_open_A508_on/simulation/fullbody_force.avi
++ge/guard_acceptance/evidence/onehand_20261007/20261007_141226_prepared_general32_onehand_A508_on/simulation/fullbody_force.avi
++ge/guard_acceptance/evidence/loop_upgrade_20261007/simulation/fullbody_force.avi
++ge/guard_acceptance/evidence/dynamic_merge_20261007/runs/20261007_163315_prepared_general32_behind_twohand_pickup_A508_on/simulation/fullbody_force.avi
++ge/guard_acceptance/evidence/dynamic_merge_20261007/runs/20261007_163024_prepared_general32_lift_walk_start_A201_on/simulation/fullbody_force_until_stop.avi
++ge/guard_acceptance/evidence/dynamic_merge_20261007/runs/20261007_163024_prepared_general32_lift_walk_start_A201_on/simulation/fullbody_force.avi
++ge/guard_acceptance/evidence/dynamic_merge_20261007/runs/20261007_162126_prepared_general32_behind_twohand_pickup_A508_on/simulation/fullbody_force_until_stop.avi
++ge/guard_acceptance/evidence/dynamic_merge_20261007/runs/20261007_162126_prepared_general32_behind_twohand_pickup_A508_on/simulation/fullbody_force.avi
++ge/guard_acceptance/evidence/dynamic_merge_20261007/runs/20261007_162702_prepared_general32_wave_walk_A492_dev_on/simulation/fullbody_force_until_stop.avi
++ge/guard_acceptance/evidence/dynamic_merge_20261007/runs/20261007_162702_prepared_general32_wave_walk_A492_dev_on/simulation/fullbody_force.avi
++ge/guard_acceptance/evidence/dynamic_merge_20261007/runs/20261007_162841_prepared_general32_high_watering_walk_A501_on/simulation/fullbody_force_until_stop.avi
++ge/guard_acceptance/evidence/dynamic_merge_20261007/runs/20261007_162841_prepared_general32_high_watering_walk_A501_on/simulation/fullbody_force.avi
++ge/guard_acceptance/runs/20261007_172530_prepared_general32_twohand_turn_walk_A508_on/fullbody_force.avi
++ge/guard_acceptance/runs/20261007_162246_prepared_general32_twohand_turn_walk_A508_on/fullbody_force_until_stop.avi
++ge/guard_acceptance/runs/20261007_162246_prepared_general32_twohand_turn_walk_A508_on/fullbody_force.avi
++ge/guard_acceptance/runs/20261007_130403_prepared_general32_button_A480_on/fullbody_force_until_stop.avi
++ge/guard_acceptance/runs/20261007_130403_prepared_general32_button_A480_on/fullbody_force.avi
++ge/guard_acceptance/runs/20261007_162005_prepared_general32_door_open_A508_on/fullbody_force_until_stop.avi
++ge/guard_acceptance/runs/20261007_162005_prepared_general32_door_open_A508_on/fullbody_force.avi
++ge/guard_acceptance/runs/20261007_163315_prepared_general32_behind_twohand_pickup_A508_on/fullbody_force.avi
++ge/guard_acceptance/evidence/dynamic_merge_20261007/runs/20261007_162535_prepared_general32_onehand_turn_walk_A508_on/simulation/fullbody_force_until_stop.avi
++ge/guard_acceptance/evidence/dynamic_merge_20261007/runs/20261007_162535_prepared_general32_onehand_turn_walk_A508_on/simulation/fullbody_force.avi
++ge/guard_acceptance/runs/20261007_142238_prepared_general32_sideway_A021_on/fullbody_force.avi
++ge/guard_acceptance/runs/20261007_163024_prepared_general32_lift_walk_start_A201_on/fullbody_force_until_stop.avi
++ge/guard_acceptance/runs/20261007_163024_prepared_general32_lift_walk_start_A201_on/fullbody_force.avi
++ge/guard_acceptance/runs/20261007_170851_prepared_general32_twohand_turn_walk_A508_on/fullbody_force.avi
++ge/guard_acceptance/runs/20261007_170731_prepared_general32_lift_walk_start_A201_on/fullbody_force.avi
++ge/guard_acceptance/runs/20261007_170058_prepared_general32_wave_walk_A492_dev_on/fullbody_force.avi
++ge/guard_acceptance/runs/20261007_162126_prepared_general32_behind_twohand_pickup_A508_on/fullbody_force_until_stop.avi
++ge/guard_acceptance/runs/20261007_162126_prepared_general32_behind_twohand_pickup_A508_on/fullbody_force.avi
++ge/guard_acceptance/runs/20261007_162702_prepared_general32_wave_walk_A492_dev_on/fullbody_force_until_stop.avi
++ge/guard_acceptance/runs/20261007_162702_prepared_general32_wave_walk_A492_dev_on/fullbody_force.avi
++ge/guard_acceptance/runs/20261007_162841_prepared_general32_high_watering_walk_A501_on/fullbody_force_until_stop.avi
++ge/guard_acceptance/runs/20261007_162841_prepared_general32_high_watering_walk_A501_on/fullbody_force.avi
++ge/guard_acceptance/runs/20261007_170455_prepared_general32_behind_twohand_pickup_A508_on/fullbody_force.avi
++ge/guard_acceptance/runs/20261007_175611_prepared_general32_sideway_stop_A021_on/fullbody_force.avi
++ge/guard_acceptance/runs/20261007_162535_prepared_general32_onehand_turn_walk_A508_on/fullbody_force_until_stop.avi
++ge/guard_acceptance/runs/20261007_162535_prepared_general32_onehand_turn_walk_A508_on/fullbody_force.avi
++ge/guard_acceptance/runs/20261007_141226_prepared_general32_onehand_A508_on/fullbody_force.avi
++ge/guard_acceptance/runs/20261007_162410_prepared_general32_sideway_stop_A021_on/fullbody_force_until_stop.avi
++ge/guard_acceptance/runs/20261007_162410_prepared_general32_sideway_stop_A021_on/fullbody_force.avi
++ge/guard_acceptance/runs/20261007_170623_prepared_general32_high_watering_walk_A501_on/fullbody_force.avi
++ge/guard_acceptance/runs/20261007_172347_prepared_general32_behind_twohand_pickup_A508_on/fullbody_force.avi
++ge/guard_acceptance/runs/20261007_170326_prepared_general32_wave_walk_A492_dev_on/fullbody_force.avi
++ge/guard_acceptance/runs/20261007_172205_prepared_general32_door_open_A508_on/fullbody_force.avi
++ge/guard_acceptance/runs/20261007_131610_prepared_general32_button_A480_on/fullbody_force.avi
++ge/guard_acceptance/evidence/dynamic_merge_20261007/runs/20261007_162410_prepared_general32_sideway_stop_A021_on/simulation/fullbody_force_until_stop.avi
++ge/guard_acceptance/evidence/dynamic_merge_20261007/runs/20261007_162410_prepared_general32_sideway_stop_A021_on/simulation/fullbody_force.avi
+-- 
+2.34.1
+

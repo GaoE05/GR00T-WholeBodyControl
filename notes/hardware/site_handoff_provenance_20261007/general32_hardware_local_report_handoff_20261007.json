@@ -1,0 +1,21 @@
+{
+  "schema": "general32-local-report-handoff-v1",
+  "report_branch": "codex/general32-hardware-results-20261007",
+  "report_commit": "5153b3396e44de9f6fa697aa71b4aefa57aea346",
+  "report_checkout": "/home/user/code/ge/SoftSONIC-hardware-results-20261007",
+  "report_path": "/home/user/code/ge/SoftSONIC-hardware-results-20261007/notes/hardware/general32_hardware_results_20261007.md",
+  "zip_path": "/home/user/code/ge/SoftSONIC_general32_hardware_results_20261007_5153b33.zip",
+  "checksum_and_validation_receipt": "general32_hardware_zip_handoff_20261007.json (generated packaging artifact)",
+  "run_count": 36,
+  "profiles": 9,
+  "on": 22,
+  "off": 14,
+  "unseen_on": [
+    "20261007_174302_general32_lift_walk_start_A201_on",
+    "20261007_174626_general32_high_watering_walk_A501_on"
+  ],
+  "conclusion": "A501/A201 current32-unseen on身份有日志绑定，操作者定性报告退让；撤力恢复/外力与逐次物理效果unknown，不补PASS",
+  "git_remote_published": false,
+  "user_instruction": "No more push/account configuration; coordinator syncs after receiving ZIP",
+  "new_robot_tests": false
+}

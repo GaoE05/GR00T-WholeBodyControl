@@ -1,0 +1,170 @@
+{
+  "schema": "softsonic-general32-hardware-results-delivery-v1",
+  "created_utc": "2026-10-07T11:42:04.821498+00:00",
+  "repository_target": "GaoE05/GR00T-WholeBodyControl",
+  "source_checkout": "/home/user/code/ge/SoftSONIC-hardware-results-20261007",
+  "source_branch": "codex/general32-hardware-results-20261007",
+  "source_commit": "5153b3396e44de9f6fa697aa71b4aefa57aea346",
+  "patch_base_commit": "163d7f4cab0585ce16488bf596f2c8ff4a4d9f63",
+  "commits": [
+    "248be44065e48b3b9fa42a44090e71b235386e77 docs: record general32 hardware trials and unseen-reference observations",
+    "725c4407c6ec0b1d0ff273805ce5477af857deca docs: record report publication authentication and SSH blockers",
+    "5153b3396e44de9f6fa697aa71b4aefa57aea346 docs: prepare local patch handoff and evidence locations"
+  ],
+  "patch_replay": {
+    "status": "PASS_REPORT_TREE_EQUAL",
+    "expected_tree": "4fcd25c135fda5e5df8aad6cd24f7625f32d4f49",
+    "replayed_tree": "4fcd25c135fda5e5df8aad6cd24f7625f32d4f49",
+    "scope": "Report patch syntax and exact tree replay; not a new controller/native/robot acceptance"
+  },
+  "hardware_evidence": {
+    "runs": 36,
+    "motion_profiles": [
+      "general32_button_A480",
+      "general32_door_open_A508",
+      "general32_high_watering_walk_A501",
+      "general32_lift_walk_start_A201",
+      "general32_onehand_A508",
+      "general32_sideway_A021",
+      "general32_sideway_stop_A021",
+      "general32_stand",
+      "general32_walking"
+    ],
+    "on_runs": 22,
+    "off_runs": 14,
+    "unseen_on_runs": [
+      "20261007_174302_general32_lift_walk_start_A201_on",
+      "20261007_174626_general32_high_watering_walk_A501_on"
+    ],
+    "conclusion": "未见参考动作上的初步真机柔顺迁移/泛化迹象；操作者定性观察，未确认项未补PASS",
+    "unknown": [
+      "force magnitude",
+      "left/right and direction per run",
+      "force/release timestamps",
+      "release recovery",
+      "unforced hold",
+      "associated real hardware video",
+      "physical fall per run"
+    ]
+  },
+  "remote_publish_status": "NOT_PUBLISHED_USER_REQUESTED_COORDINATOR_HANDOFF",
+  "github_account_configured": false,
+  "new_robot_tests_started": false,
+  "files": [
+    {
+      "path": "README.txt",
+      "bytes": 775,
+      "sha256": "6a607ee404f9bad0288d3fc4579119ba4e82843f54da06a4b4e0d4b4a0619c07"
+    },
+    {
+      "path": "notes/hardware/.gitattributes",
+      "bytes": 99,
+      "sha256": "12a8dd016b1db2ac74e21bc43f4c16a0af9d59881d174115cca8629bae2fa53c"
+    },
+    {
+      "path": "notes/hardware/DELIVERY_20261007.md",
+      "bytes": 3640,
+      "sha256": "8ef21910812fa04dc47b6779796fa3d08a2d50ef7194eec69a86364076932ead"
+    },
+    {
+      "path": "notes/hardware/EVIDENCE_LOCATIONS_20261007.md",
+      "bytes": 11935,
+      "sha256": "a0c46c59c134ba70afb1cc31b77862fd5675f89dc1b5b9e7ff3dcc0cba65444b"
+    },
+    {
+      "path": "notes/hardware/analyze_general32_hardware.py",
+      "bytes": 19324,
+      "sha256": "b0cb6fa7c88fae82aecbffdea47ca97952ef416bfdb42c74e0fd98080fbfd24c"
+    },
+    {
+      "path": "notes/hardware/controller_playback_diff_842cab_to_d9d9a7f.patch",
+      "bytes": 4964,
+      "sha256": "d506d86b711dda95c2117d0a4e4c86519fda1208553100ed1ce0f91cb739cae8"
+    },
+    {
+      "path": "notes/hardware/general32_hardware_SHA256SUMS_20261007.txt",
+      "bytes": 1247,
+      "sha256": "24ae2e136a7754c36303f2c1df098a68cccfb4a806545036b5e9f135ad5e8d65"
+    },
+    {
+      "path": "notes/hardware/general32_hardware_experiments_20261007.csv",
+      "bytes": 13463,
+      "sha256": "3f657b7dafe483e5651dd00731a80e5f5178ca3e8e0e28c36215f769637488d0"
+    },
+    {
+      "path": "notes/hardware/general32_hardware_experiments_20261007.json",
+      "bytes": 1066909,
+      "sha256": "403c1acd6fbe8144edf201202bade1a0e8c97e7509e5eaef5df1cc1915639c16"
+    },
+    {
+      "path": "notes/hardware/general32_hardware_identity_20261007.json",
+      "bytes": 105152,
+      "sha256": "aced8779e01c968c6f3a0ab00994a1697ed159cae687c6e49c58a89c4ce96177"
+    },
+    {
+      "path": "notes/hardware/general32_hardware_results_20261007.md",
+      "bytes": 17266,
+      "sha256": "088459129a0f3ab8311f6ae986970ecba4e5e1c797fcb80541bee562e379d1e9"
+    },
+    {
+      "path": "notes/hardware/general32_hardware_sync_status_20261007.json",
+      "bytes": 1288,
+      "sha256": "6ae393911648a773fea3d5193fe9fb607669a6fd275dd886f06b8fde205e88f9"
+    },
+    {
+      "path": "notes/hardware/general32_native_actor_receipt_site_20261007.json",
+      "bytes": 2567,
+      "sha256": "d02b47192ec4fdb906f66a3739cc52018442d605af13478f23f899bfe03e2364"
+    },
+    {
+      "path": "notes/hardware/general32_reference_inventory_20261007.json",
+      "bytes": 7920,
+      "sha256": "4d50ffb2895416a511c1484335bc3ef91b3daf3363527b1168fa60fbe993fc47"
+    },
+    {
+      "path": "patches/0001-docs-record-general32-hardware-trials-and-unseen-ref.patch",
+      "bytes": 1273865,
+      "sha256": "aaa8cca170aa261710192d377af705434cfc90b040a7723fd2acd9431de77b1e"
+    },
+    {
+      "path": "patches/0002-docs-record-report-publication-authentication-and-SS.patch",
+      "bytes": 5529,
+      "sha256": "b167e04851fbcf8fc250442d4b360f865ea9e0ff743a8d9b6af30bbb33dbebaa"
+    },
+    {
+      "path": "patches/0003-docs-prepare-local-patch-handoff-and-evidence-locati.patch",
+      "bytes": 22172,
+      "sha256": "fa6773d0d60c2d0085c8b5e6eb76b5d6d2002450d1ebee830fd5680e60e8fdeb"
+    },
+    {
+      "path": "patches/site_acceptance/0001-docs-hand-off-general32-hardware-evidence-as-local-r.patch",
+      "bytes": 12041,
+      "sha256": "08ceaf1fc0259c60e0c0f360244c3f279314decb759f5dd268a07ef80251a203"
+    },
+    {
+      "path": "site_acceptance/README.txt",
+      "bytes": 541,
+      "sha256": "55912832164f6388dd5c88ca23a78004d8afb0c710dc9bb3297cf55686f12fca"
+    },
+    {
+      "path": "site_acceptance/general32_hardware_local_report_handoff_20261007.json",
+      "bytes": 1119,
+      "sha256": "2d5f90d700e6fbf53583794b9e4076f57b56ef99cce11ab417e1c2b22dae7ce7"
+    },
+    {
+      "path": "site_acceptance/hardware_video_inventory_20261007.txt",
+      "bytes": 6644,
+      "sha256": "d813cf59d290763a2acc8ef854fbe23d61378b286e77730ca344cbce7d8f6f2b"
+    }
+  ],
+  "site_acceptance_commit": {
+    "repository_path": "/home/user/code/ge/guard_acceptance",
+    "branch": "codex/guard-acceptance-20261006",
+    "base_commit": "716167b13e7fec0353ca0ae97ec6d77ad1841c5c",
+    "commit": "4c65343d43eced5d5f021cb2978ee929b2f644af",
+    "patch_path": "patches/site_acceptance/0001-docs-hand-off-general32-hardware-evidence-as-local-r.patch",
+    "patch_replay_status": "PASS_SITE_ACCEPTANCE_TREE_EQUAL",
+    "scope": "Optional onsite handoff record, separate from GitHub SONIC report patches"
+  },
+  "total_related_commit_patches": 4
+}
