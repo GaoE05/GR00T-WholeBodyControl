@@ -1,0 +1,12 @@
+{
+  "source_head": "e871835f691dea97f23178bd67f9d526d71d390e",
+  "source_tree": "762c8a7feb7a81c8c822c762d863e27ca03f0996",
+  "exact_tree_replay_pass": true,
+  "replay_head": "11ec15238eea51346bd12dfd057f194ec5ea6130",
+  "coordinator_report_increment_head": "d200c424d38d8ef4ae1acea2a2165d486668004a",
+  "source_note_files_sha_verified": 19,
+  "existing_coordinator_provenance_preserved": true,
+  "acceptance_patch_archived_not_applied": true,
+  "scope": "Package and exact source tree verified; hardware raw logs absent and not recomputed; report code not executed; controller/models/gains unchanged",
+  "zip_sha256": "3a5eb5da24d139a0edaa640d20482dcca7842f3151fc1b90c420f2352fd46396"
+}
