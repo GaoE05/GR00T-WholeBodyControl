@@ -1,0 +1,91 @@
+diff --git a/gear_sonic_deploy/src/g1/g1_deploy_onnx_ref/include/softsonic_residual.hpp b/gear_sonic_deploy/src/g1/g1_deploy_onnx_ref/include/softsonic_residual.hpp
+index f9f218f..af03684 100644
+--- a/gear_sonic_deploy/src/g1/g1_deploy_onnx_ref/include/softsonic_residual.hpp
++++ b/gear_sonic_deploy/src/g1/g1_deploy_onnx_ref/include/softsonic_residual.hpp
+@@ -7,6 +7,8 @@
+ 
+ namespace softsonic {
+ struct Config {
++  bool loop_reference = false;
++  std::uint64_t reference_repeats = 1;
+   std::string joint_limits;
+   std::string target_environment = "hardware";
+   std::string target_trace;
+diff --git a/gear_sonic_deploy/src/g1/g1_deploy_onnx_ref/src/g1_deploy_softsonic.cpp b/gear_sonic_deploy/src/g1/g1_deploy_onnx_ref/src/g1_deploy_softsonic.cpp
+index bc7623d..65130b8 100644
+--- a/gear_sonic_deploy/src/g1/g1_deploy_onnx_ref/src/g1_deploy_softsonic.cpp
++++ b/gear_sonic_deploy/src/g1/g1_deploy_onnx_ref/src/g1_deploy_softsonic.cpp
+@@ -358,6 +358,9 @@ class G1Deploy {
+     softsonic::JointLimits startup_limits_;
+     std::unique_ptr<softsonic::ResidualEngine> softsonic_engine_;
+     std::unique_ptr<softsonic::LoopTiming> softsonic_loop_timing_;
++    bool loop_reference_ = false;
++    uint64_t reference_loops_ = 0;
++    uint64_t reference_repeats_ = 1;
+     std::unique_ptr<EncoderEngine> encoder_engine_;
+     EncoderConfig encoder_config_;  // Encoder configuration from observation config
+     bool is_using_encoder_ = false;
+@@ -2213,6 +2216,8 @@ class G1Deploy {
+         //env(ORT_LOGGING_LEVEL_WARNING, "G1Deploy"),
+         model_path(model_file_path),
+         planner_path(planner_file_path) {
++      loop_reference_ = softsonic_config.loop_reference;
++      reference_repeats_ = softsonic_config.reference_repeats;
+       // Mandatory binary-level checks, before DDS and MotionSwitcher.
+       auto limits = softsonic::JointLimits::Load(softsonic_config.joint_limits,
+           softsonic_config.target_environment, networkInterface, disable_crc_check);
+@@ -3524,6 +3529,21 @@ class G1Deploy {
+         // Check if motion completed (reached the end)
+         if (current_motion_->name != "streamed") {
+           if (current_frame_ >= current_motion_->timesteps) {
++            if ((loop_reference_ || reference_loops_ < reference_repeats_ - 1) &&
++                current_motion_->name != "temporary_motion") {
++              // Wrap only reference time. Physical state, heading and observation
++              // histories remain continuous; the normal residual gate handles wrap.
++              current_frame_ = 0;
++              ++reference_loops_;
++              if (loop_reference_) {
++                std::cout << "[SoftSONIC] Reference loop " << reference_loops_;
++              } else {
++                std::cout << "[SoftSONIC] Reference repeat " << reference_loops_ + 1
++                          << "/" << reference_repeats_;
++              }
++              std::cout << ": " << current_motion_->name << "; O stops control." << std::endl;
++              return true;
++            }
+             operator_state.play = false;
+             if (current_motion_ ->name != "temporary_motion") {
+               std::cout << "______________________________________________________" << std::endl;
+@@ -4383,7 +4403,20 @@ int main(int argc, char const* argv[]) {
+   softsonic::Config softsonic_config;
+   for (int i = 4; i < argc; i++) {
+     const std::string softsonic_arg(argv[i]);
+-    if (softsonic_arg == "--joint-limits" || softsonic_arg == "--target-trace" ||
++    if (softsonic_arg == "--loop-reference") {
++      softsonic_config.loop_reference = true;
++    } else if (softsonic_arg == "--reference-repeats") {
++      if (i + 1 >= argc) { std::cerr << "Missing reference repeat count" << std::endl; return 1; }
++      const std::string value(argv[++i]);
++      try {
++        if (value.empty() || value.find_first_not_of("0123456789") != std::string::npos)
++          throw std::invalid_argument("positive integer required");
++        softsonic_config.reference_repeats = std::stoull(value);
++        if (softsonic_config.reference_repeats == 0) throw std::invalid_argument("positive integer required");
++      } catch (const std::exception& e) {
++        std::cerr << "Invalid --reference-repeats: " << e.what() << std::endl; return 1;
++      }
++    } else if (softsonic_arg == "--joint-limits" || softsonic_arg == "--target-trace" ||
+         softsonic_arg == "--target-environment") {
+       if (i + 1 >= argc) { std::cerr << "Missing target guard option value" << std::endl; return 1; }
+       const std::string value(argv[++i]);
+@@ -4640,6 +4673,10 @@ int main(int argc, char const* argv[]) {
+   }
+ 
+   std::cout << "[DEBUG] Creating G1Deploy object..." << std::endl;
++  if (softsonic_config.loop_reference && softsonic_config.reference_repeats != 1) {
++    std::cerr << "--loop-reference and --reference-repeats cannot be combined" << std::endl;
++    return 1;
++  }
+   G1Deploy custom(
+     networkInterface,
+     modelFile,

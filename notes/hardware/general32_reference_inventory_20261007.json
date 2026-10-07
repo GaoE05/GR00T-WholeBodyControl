@@ -1,0 +1,177 @@
+[
+  {
+    "profile": "general32_stand",
+    "hardware_run_ids": [
+      "20261007_123242_general32_stand_on",
+      "20261007_142738_general32_stand_on",
+      "20261007_150926_general32_stand_off",
+      "20261007_151013_general32_stand_on",
+      "20261007_151556_general32_stand_off",
+      "20261007_151701_general32_stand_on"
+    ],
+    "status": "LOGS_AVAILABLE_NOT_BLANKET_PASS",
+    "reference_root": "motion_sets/stand",
+    "actor_sha256": "f9ad4973f3238db1caf56a821c90fa4ce44b01aedcb9b6f8575393fea23fd107",
+    "training_split": "seen",
+    "source_key": "big_light_two_hands_hold_R_001__A508",
+    "frames": 847
+  },
+  {
+    "profile": "general32_walking",
+    "hardware_run_ids": [
+      "20261007_123408_general32_walking_on",
+      "20261007_152121_general32_walking_off",
+      "20261007_152252_general32_walking_on"
+    ],
+    "status": "LOGS_AVAILABLE_NOT_BLANKET_PASS",
+    "reference_root": "motion_sets/walking",
+    "actor_sha256": "f9ad4973f3238db1caf56a821c90fa4ce44b01aedcb9b6f8575393fea23fd107",
+    "training_split": "seen",
+    "source_key": "230216/lift_crate_walk_ff_loop_180_R_003__A200.csv",
+    "frames": 600
+  },
+  {
+    "profile": "general32_button_A480",
+    "hardware_run_ids": [
+      "20261007_130954_general32_button_A480_on",
+      "20261007_131916_general32_button_A480_on",
+      "20261007_150508_general32_button_A480_off",
+      "20261007_151223_general32_button_A480_off",
+      "20261007_151317_general32_button_A480_on",
+      "20261007_174901_general32_button_A480_on",
+      "20261007_175229_general32_button_A480_off"
+    ],
+    "status": "LOGS_AVAILABLE_NOT_BLANKET_PASS",
+    "reference_root": "/home/user/code/ge/SoftSONIC_general32_新增动作_20261007/motion_sets/button_A480",
+    "actor_sha256": "f9ad4973f3238db1caf56a821c90fa4ce44b01aedcb9b6f8575393fea23fd107",
+    "training_split": "seen",
+    "source_key": "231018/high_button_over_push_001__A480.csv",
+    "frames": 322
+  },
+  {
+    "profile": "general32_onehand_A508",
+    "hardware_run_ids": [
+      "20261007_141649_general32_onehand_A508_on",
+      "20261007_150609_general32_onehand_A508_off",
+      "20261007_150721_general32_onehand_A508_on",
+      "20261007_151808_general32_onehand_A508_off",
+      "20261007_151858_general32_onehand_A508_on"
+    ],
+    "status": "LOGS_AVAILABLE_NOT_BLANKET_PASS",
+    "reference_root": "/home/user/code/ge/SoftSONIC_general32_新增动作_20261007/motion_sets/onehand_A508",
+    "actor_sha256": "f9ad4973f3238db1caf56a821c90fa4ce44b01aedcb9b6f8575393fea23fd107",
+    "training_split": "seen",
+    "source_key": "231114/big_light_one_hand_hold_R_001__A508.csv",
+    "frames": 574
+  },
+  {
+    "profile": "general32_sideway_A021",
+    "hardware_run_ids": [
+      "20261007_142524_general32_sideway_A021_off",
+      "20261007_175735_general32_sideway_A021_on",
+      "20261007_175931_general32_sideway_A021_off"
+    ],
+    "status": "LOGS_AVAILABLE_NOT_BLANKET_PASS",
+    "reference_root": "/home/user/code/ge/SoftSONIC_general32_新增动作_20261007/motion_sets/sideway_A021",
+    "actor_sha256": "f9ad4973f3238db1caf56a821c90fa4ce44b01aedcb9b6f8575393fea23fd107",
+    "training_split": "seen",
+    "source_key": "220713/walk_sideway_045_loop_001__A021.csv",
+    "frames": 592
+  },
+  {
+    "profile": "general32_door_open_A508",
+    "hardware_run_ids": [
+      "20261007_165210_general32_door_open_A508_off",
+      "20261007_165319_general32_door_open_A508_on",
+      "20261007_165357_general32_door_open_A508_on",
+      "20261007_173345_general32_door_open_A508_on",
+      "20261007_173529_general32_door_open_A508_off",
+      "20261007_173630_general32_door_open_A508_on"
+    ],
+    "status": "LOGS_AVAILABLE_NOT_BLANKET_PASS",
+    "reference_root": "/home/user/code/ge/SoftSONIC_general32_真机动态动作合并包_20261007/motion_sets/door_open_A508",
+    "actor_sha256": "f9ad4973f3238db1caf56a821c90fa4ce44b01aedcb9b6f8575393fea23fd107",
+    "training_split": "seen",
+    "source_key": "231114/outside_door_handle_right_side_open_full_R_002__A508.csv",
+    "frames": 267
+  },
+  {
+    "profile": "general32_behind_twohand_pickup_A508",
+    "hardware_run_ids": [],
+    "status": "PREPARED_NO_HARDWARE_LOG_FOUND",
+    "reference_root": "/home/user/code/ge/SoftSONIC_general32_真机动态动作合并包_20261007/motion_sets/behind_twohand_pickup_A508",
+    "actor_sha256": "f9ad4973f3238db1caf56a821c90fa4ce44b01aedcb9b6f8575393fea23fd107",
+    "training_split": "seen",
+    "source_key": "231114/medium_heavy_two_hands_pick_up_behind_medium_R_001__A508.csv",
+    "frames": 279
+  },
+  {
+    "profile": "general32_twohand_turn_walk_A508",
+    "hardware_run_ids": [],
+    "status": "PREPARED_NO_HARDWARE_LOG_FOUND",
+    "reference_root": "/home/user/code/ge/SoftSONIC_general32_真机动态动作合并包_20261007/motion_sets/twohand_turn_walk_A508",
+    "actor_sha256": "f9ad4973f3238db1caf56a821c90fa4ce44b01aedcb9b6f8575393fea23fd107",
+    "training_split": "seen",
+    "source_key": "231114/big_light_two_hands_turn_walk_270_R_001__A508.csv",
+    "frames": 280
+  },
+  {
+    "profile": "general32_sideway_stop_A021",
+    "hardware_run_ids": [
+      "20261007_165547_general32_sideway_stop_A021_on",
+      "20261007_165829_general32_sideway_stop_A021_on"
+    ],
+    "status": "LOGS_AVAILABLE_NOT_BLANKET_PASS",
+    "reference_root": "/home/user/code/ge/SoftSONIC_general32_真机动态动作合并包_20261007/motion_sets/sideway_stop_A021",
+    "actor_sha256": "f9ad4973f3238db1caf56a821c90fa4ce44b01aedcb9b6f8575393fea23fd107",
+    "training_split": "seen",
+    "source_key": "220713/walk_sideway_045_stop_001__A021.csv",
+    "frames": 499
+  },
+  {
+    "profile": "general32_onehand_turn_walk_A508",
+    "hardware_run_ids": [],
+    "status": "PREPARED_NO_HARDWARE_LOG_FOUND",
+    "reference_root": "/home/user/code/ge/SoftSONIC_general32_真机动态动作合并包_20261007/motion_sets/onehand_turn_walk_A508",
+    "actor_sha256": "f9ad4973f3238db1caf56a821c90fa4ce44b01aedcb9b6f8575393fea23fd107",
+    "training_split": "seen",
+    "source_key": "231114/big_light_one_hand_turn_walk_270_R_002__A508.csv",
+    "frames": 274
+  },
+  {
+    "profile": "general32_wave_walk_A492_dev",
+    "hardware_run_ids": [],
+    "status": "PREPARED_NO_HARDWARE_LOG_FOUND",
+    "reference_root": "/home/user/code/ge/SoftSONIC_general32_真机动态动作合并包_20261007/motion_sets/wave_walk_A492_dev",
+    "actor_sha256": "f9ad4973f3238db1caf56a821c90fa4ce44b01aedcb9b6f8575393fea23fd107",
+    "training_split": "development-unseen",
+    "source_key": "231024/walk_arc_cw_loop_R_wave_right_hand_270_R_turn_walk_270_R_002__A492.csv",
+    "frames": 652
+  },
+  {
+    "profile": "general32_high_watering_walk_A501",
+    "hardware_run_ids": [
+      "20261007_174626_general32_high_watering_walk_A501_on",
+      "20261007_174737_general32_high_watering_walk_A501_off"
+    ],
+    "status": "LOGS_AVAILABLE_NOT_BLANKET_PASS",
+    "reference_root": "/home/user/code/ge/SoftSONIC_general32_真机动态动作合并包_20261007/motion_sets/high_watering_walk_A501",
+    "actor_sha256": "f9ad4973f3238db1caf56a821c90fa4ce44b01aedcb9b6f8575393fea23fd107",
+    "training_split": "current32-unseen_future-full-training-candidate",
+    "source_key": "231110/watering_plants_high_walk_ff_stop_360_R_002__A501.csv",
+    "frames": 765
+  },
+  {
+    "profile": "general32_lift_walk_start_A201",
+    "hardware_run_ids": [
+      "20261007_174302_general32_lift_walk_start_A201_on",
+      "20261007_174456_general32_lift_walk_start_A201_off"
+    ],
+    "status": "LOGS_AVAILABLE_NOT_BLANKET_PASS",
+    "reference_root": "/home/user/code/ge/SoftSONIC_general32_真机动态动作合并包_20261007/motion_sets/lift_walk_start_A201",
+    "actor_sha256": "f9ad4973f3238db1caf56a821c90fa4ce44b01aedcb9b6f8575393fea23fd107",
+    "training_split": "current32-unseen_future-full-training-candidate",
+    "source_key": "230216/lift_crate_walk_ff_start_360_R_001__A201.csv",
+    "frames": 840
+  }
+]

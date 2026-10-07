@@ -1,0 +1,35 @@
+{
+  "status": "GENERAL32_NATIVE_ACTOR_CHECK_PASS",
+  "actor_sha256": "f9ad4973f3238db1caf56a821c90fa4ce44b01aedcb9b6f8575393fea23fd107",
+  "controller_sha256": "7170662a5aa864627d4466ee328072be5c5cdab0c58a7ab0a3d77c4d9a3e9af7",
+  "controller_commit": "d9d9a7f03d1454bc0358403d5766fcc3f5772d91",
+  "profile_set_sha256": "9faf007d08b74833c2406b97525f57b7e30cdfbab901deef9462a2f13571728b",
+  "native_actor_stdout": "GENERAL32_NATIVE_ACTOR_CHECK_PASS rows=64 gain=1 maxerr=3.27826e-07\n",
+  "native_actor_tool_sha256": "2c969579b2f700beaab331a9f7c58325e8c0190bea4be2c3694b14d85ae4a1df",
+  "golden_sha256": "bc4d13b8c32e6cb38aacb34ed13faa3f8de7f7d9182a102234ed5ffd29f6422c",
+  "codec_native_evidence": {
+    "status": "RERUN_NATIVE_CHECK_PASS",
+    "receipt_sha256": "61e5b2d5410cac8162e4c2502a0918a849791f47d53f6876872f7189610398a4",
+    "native_binary_sha256": "b4812d54c050062d7a5aaa59aeeed4ea657e9509bae1cd80c2677efa798531c6",
+    "native_backend_pass": true
+  },
+  "scope": "Native C++ ResidualEngine general32 golden 64 rows gain1; existing TRT codec unchanged; new reference combination requires simulation; hardware not tested",
+  "reference_extension_binding": {
+    "previous_receipt_sha256": "ecbc957fa801b4a23278714142f0b972e4814438aadf30b5f2c17fa54e406df3",
+    "previous_profiles_sha256": "2eb0c9cab5c91b33542a438d8cdb22316a3e8a101b3fb8eb7c01886310bd5b48",
+    "reason": "Same actor, codec, binary and C++ runtime. New external references verified separately; no new native actor inference claimed.",
+    "reference_manifest_sha256": "d184ff8638e69d43bd34e041235ae86782780d2ea6ef9f4199bd1499b66de5d9",
+    "native_scope": "actor only; not new reference closed-loop or hardware PASS"
+  },
+  "loop_upgrade_previous_receipt_sha256": "48bca55abea013d54020c3c8708326dff7d7cf523a919b1c5452ec11d4ff9ee7",
+  "dynamic_merge_binding": {
+    "previous_receipt_sha256": "f2e1496e0683bb9c9e609eadfb83d5afe4a9e1e961d48d104276ab96cec0a3e9",
+    "previous_profile_set_sha256": "4626cb3d748af999761733f7aed06a6060c3a62d21c68093c550f1296b3a42bd",
+    "manifest_sha256": "4c04327be0d4de985e2b193531532a4f244c78c1d2331805be019aeb1cf0c65f",
+    "reason": "Same actor, codec, binary and C++ runtime; only external reference profiles bound. Reuse actual native evidence, no new inference or sim/hardware PASS claimed."
+  },
+  "repeat_count_upgrade": {
+    "previous_receipt_sha256": "3e56def600b67c172851d3334fe8d4179294e689c04865cb9336a9c5b92fee78",
+    "reason": "Only optional playback count changed; actual native codec and actor golden checks rerun for current binary."
+  }
+}
