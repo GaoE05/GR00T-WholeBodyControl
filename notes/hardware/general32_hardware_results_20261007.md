@@ -119,3 +119,8 @@ code/ge 中盘点到55个 AVI（含重复 archive），均来自 MuJoCo prepared
 协调 session 可引用本报告和结构化表：2条 unseen on 日志身份已确认；退让为初步定性报告，撤力恢复/精确力/严格量化迁移仍缺证据。报告分支 commit 与状态在现场接力 receipt 中记录，未通过工具向未知 session 地址自动发消息。
 
 同步目标为用户指定的 `GaoE05/GR00T-WholeBodyControl` / `codex/general32-hardware-results-20261007`。此前 Git CLI HTTPS 因无本地凭据失败，连接器写 blob 返回 `403 Resource not accessible by integration`，现场 SSH 探测超时。用户随后明确选择本地 Git + patch/ZIP 接力：**停止本 session 的远端发布尝试，不配置 GitHub 账号，由协调 session 接包同步**。已有本地 commit 保留，尚未发布 GitHub，不提供虚构的远端 commit/PR 链接；仓库原有可见性未改。最终源 commit、patch 与 ZIP 文件清单在 ZIP 顶层 DELIVERY.json 中，接入说明见 DELIVERY_20261007.md。
+
+
+## 已有36次日志的分阶段补充分析
+
+见 [general32_phase_bottleneck_report_20261007.md](general32_phase_bottleneck_report_20261007.md)。全部36次做phase/residual/raw统计，onehand_A508、A501、A201共9次做writer目标和q/dq/tau_est对齐；没有新实验或参数修改。修正action.csv上一tick错位后最大目标重建差1.1921e-7rad。A201/A501末帧未见residual .5采样却有腕部长期±3；A201腕实际q贴近已发布目标，优先关注decoder/目标端点空间，肩部同时有PD误差/恢复负载。不能据此认定统一硬件瓶颈、真实外力、量化柔顺净增益或恢复PASS。新JSON/两张CSV保留各run/关节/阶段与证据SHA。

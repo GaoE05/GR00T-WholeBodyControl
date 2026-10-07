@@ -1,0 +1,23 @@
+{
+  "schema": "general32-phase-analysis-verification-v1",
+  "run_count": 36,
+  "writer_aligned_priority_runs": 9,
+  "joint_phase_rows": 783,
+  "unique_source_files_sha_verified": 243,
+  "matched_raw_target_ticks": 25881,
+  "max_float32_target_reconstruction_error_rad": 1.1920928955078125e-07,
+  "numeric_events_rows": 952,
+  "unknown_force_release_events_preserved": true,
+  "new_hardware_simulation_inference_runs": 0,
+  "verification_scope": "Offline provenance/schema/array/alignment verification only; not hardware effect acceptance",
+  "same_tick_sparse_coincidence_verified": {
+    "20261007_174302_general32_lift_walk_start_A201_on": {
+      "right_wrist_pitch_raw_endpoint_with_residual_below_limit": 48,
+      "available_samples": 49
+    },
+    "20261007_174626_general32_high_watering_walk_A501_on": {
+      "right_wrist_pitch_raw_endpoint_with_residual_below_limit": 28,
+      "available_samples": 29
+    }
+  }
+}
