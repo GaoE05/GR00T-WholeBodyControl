@@ -118,8 +118,4 @@ code/ge 中盘点到55个 AVI（含重复 archive），均来自 MuJoCo prepared
 
 协调 session 可引用本报告和结构化表：2条 unseen on 日志身份已确认；退让为初步定性报告，撤力恢复/精确力/严格量化迁移仍缺证据。报告分支 commit 与状态在现场接力 receipt 中记录，未通过工具向未知 session 地址自动发消息。
 
-同步目标为用户指定的 `GaoE05/GR00T-WholeBodyControl` / `codex/general32-hardware-results-20261007`。本次 Git CLI HTTPS push 因没有本地凭据失败；GitHub 连接器写 blob 返回 `403 Resource not accessible by integration`（账户仓库权限显示 push=true，但 integration 无内容写权限）；现场 SSH 首次遇旧 control-master broken pipe，禁用该会话复用后的443和独立22探测均在20秒超时。已保留本地 commit，**尚未发布 GitHub，不提供虚构的远端 commit/PR 链接**；仓库原有可见性未改。详见同步状态 JSON。在具备目标仓库认证的普通终端可补推：
-
-```bash
-git -C /home/user/code/ge/SoftSONIC-hardware-results-20261007 push -u origin codex/general32-hardware-results-20261007
-```
+同步目标为用户指定的 `GaoE05/GR00T-WholeBodyControl` / `codex/general32-hardware-results-20261007`。此前 Git CLI HTTPS 因无本地凭据失败，连接器写 blob 返回 `403 Resource not accessible by integration`，现场 SSH 探测超时。用户随后明确选择本地 Git + patch/ZIP 接力：**停止本 session 的远端发布尝试，不配置 GitHub 账号，由协调 session 接包同步**。已有本地 commit 保留，尚未发布 GitHub，不提供虚构的远端 commit/PR 链接；仓库原有可见性未改。最终源 commit、patch 与 ZIP 文件清单在 ZIP 顶层 DELIVERY.json 中，接入说明见 DELIVERY_20261007.md。
