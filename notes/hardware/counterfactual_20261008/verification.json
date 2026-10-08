@@ -1,0 +1,22 @@
+{
+  "schema": "general32-cpu-counterfactual-verification-v1",
+  "samples": 12,
+  "joint_rows": 348,
+  "cpu_provider_only": true,
+  "intra_inter_threads": [
+    1,
+    1
+  ],
+  "source_file_sha_verified_count": 34,
+  "snapshot_anchors": 4,
+  "selected_exact_snapshot_inputs": 2,
+  "selected_csv_reconstructed_inputs": 10,
+  "max_snapshot_obs_reconstruction_abs_error": 1.4901161193847656e-08,
+  "max_replay_raw_abs_error": 2.384185791015625e-06,
+  "max_replay_q_target_abs_error_rad": 1.043081283569336e-06,
+  "portable_rerun_results_byte_identical": true,
+  "preclip_outputs": "unavailable/null, not inferred",
+  "new_robot_DDS_simulation_runs": 0,
+  "deployment_changes": 0,
+  "input_npz_sha256": "d9121873fc2481c7a6407468e68b9cd42dcf595699e084442a34492a0a6d10c3"
+}

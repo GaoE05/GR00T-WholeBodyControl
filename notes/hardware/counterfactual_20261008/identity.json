@@ -1,0 +1,832 @@
+{
+  "schema": "general32-cpu-counterfactual-input-v1",
+  "actor_sha256": "f9ad4973f3238db1caf56a821c90fa4ce44b01aedcb9b6f8575393fea23fd107",
+  "decoder_sha256": "7e27a100cd540ea6037d2708ff87a5e2d97b79246d4c658fb3c0522b56b37a6d",
+  "checkpoint_provenance_sha256": "dbdf998a9f2210372db958b2a98f952bd0801e0a42b4b93c03204f74359c7485",
+  "controller_commit": "d9d9a7f03d1454bc0358403d5766fcc3f5772d91",
+  "binary_sha256": "7170662a5aa864627d4466ee328072be5c5cdab0c58a7ab0a3d77c4d9a3e9af7",
+  "parameters": {
+    "isaaclab_to_mujoco": [
+      0,
+      3,
+      6,
+      9,
+      13,
+      17,
+      1,
+      4,
+      7,
+      10,
+      14,
+      18,
+      2,
+      5,
+      8,
+      11,
+      15,
+      19,
+      21,
+      23,
+      25,
+      27,
+      12,
+      16,
+      20,
+      22,
+      24,
+      26,
+      28
+    ],
+    "mujoco_to_isaaclab": [
+      0,
+      6,
+      12,
+      1,
+      7,
+      13,
+      2,
+      8,
+      14,
+      3,
+      9,
+      15,
+      22,
+      4,
+      10,
+      16,
+      23,
+      5,
+      11,
+      17,
+      24,
+      18,
+      25,
+      19,
+      26,
+      20,
+      27,
+      21,
+      28
+    ],
+    "g1_action_scale": [
+      0.3506614663788243,
+      0.3506614663788243,
+      0.5475464652142304,
+      0.3506614663788243,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.3506614663788243,
+      0.3506614663788243,
+      0.5475464652142304,
+      0.3506614663788243,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.5475464652142304,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.07450087032950714,
+      0.07450087032950714,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.07450087032950714,
+      0.07450087032950714
+    ],
+    "default_angles": [
+      -0.312,
+      0.0,
+      0.0,
+      0.669,
+      -0.363,
+      0.0,
+      -0.312,
+      0.0,
+      0.0,
+      0.669,
+      -0.363,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.2,
+      0.2,
+      0.0,
+      0.6,
+      0.0,
+      0.0,
+      0.0,
+      0.2,
+      -0.2,
+      0.0,
+      0.6,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "kps": [
+      99.09842777666113,
+      99.09842777666113,
+      40.179238471373175,
+      99.09842777666113,
+      28.50124619574858,
+      28.50124619574858,
+      99.09842777666113,
+      99.09842777666113,
+      40.179238471373175,
+      99.09842777666113,
+      28.50124619574858,
+      28.50124619574858,
+      40.179238471373175,
+      28.50124619574858,
+      28.50124619574858,
+      14.25062309787429,
+      14.25062309787429,
+      14.25062309787429,
+      14.25062309787429,
+      14.25062309787429,
+      16.77832748089279,
+      16.77832748089279,
+      14.25062309787429,
+      14.25062309787429,
+      14.25062309787429,
+      14.25062309787429,
+      14.25062309787429,
+      16.77832748089279,
+      16.77832748089279
+    ],
+    "kds": [
+      6.3088018534966395,
+      6.3088018534966395,
+      2.5578897650279457,
+      6.3088018534966395,
+      1.814445686584846,
+      1.814445686584846,
+      6.3088018534966395,
+      6.3088018534966395,
+      2.5578897650279457,
+      6.3088018534966395,
+      1.814445686584846,
+      1.814445686584846,
+      2.5578897650279457,
+      1.814445686584846,
+      1.814445686584846,
+      0.907222843292423,
+      0.907222843292423,
+      0.907222843292423,
+      0.907222843292423,
+      0.907222843292423,
+      1.06814150219,
+      1.06814150219,
+      0.907222843292423,
+      0.907222843292423,
+      0.907222843292423,
+      0.907222843292423,
+      0.907222843292423,
+      1.06814150219,
+      1.06814150219
+    ],
+    "header_path": "/home/user/code/ge/SoftSONIC-controller-guard-v1/gear_sonic_deploy/src/g1/g1_deploy_onnx_ref/include/policy_parameters.hpp",
+    "header_sha256": "b9332adf07c2c9b75c9b1e0756e57c7a1c2a890d8bb0aa53c3f1905fb739b791",
+    "joints_hardware_PR_order": [
+      {
+        "index": "0",
+        "name": "left_hip_pitch_joint",
+        "lower_rad": "-2.5306999999999999",
+        "upper_rad": "2.8797999999999999"
+      },
+      {
+        "index": "1",
+        "name": "left_hip_roll_joint",
+        "lower_rad": "-0.52359999999999995",
+        "upper_rad": "2.9670999999999998"
+      },
+      {
+        "index": "2",
+        "name": "left_hip_yaw_joint",
+        "lower_rad": "-2.7576000000000001",
+        "upper_rad": "2.7576000000000001"
+      },
+      {
+        "index": "3",
+        "name": "left_knee_joint",
+        "lower_rad": "-0.087266999999999997",
+        "upper_rad": "2.8797999999999999"
+      },
+      {
+        "index": "4",
+        "name": "left_ankle_pitch_joint",
+        "lower_rad": "-0.87266999999999995",
+        "upper_rad": "0.52359999999999995"
+      },
+      {
+        "index": "5",
+        "name": "left_ankle_roll_joint",
+        "lower_rad": "-0.26179999999999998",
+        "upper_rad": "0.26179999999999998"
+      },
+      {
+        "index": "6",
+        "name": "right_hip_pitch_joint",
+        "lower_rad": "-2.5306999999999999",
+        "upper_rad": "2.8797999999999999"
+      },
+      {
+        "index": "7",
+        "name": "right_hip_roll_joint",
+        "lower_rad": "-2.9670999999999998",
+        "upper_rad": "0.52359999999999995"
+      },
+      {
+        "index": "8",
+        "name": "right_hip_yaw_joint",
+        "lower_rad": "-2.7576000000000001",
+        "upper_rad": "2.7576000000000001"
+      },
+      {
+        "index": "9",
+        "name": "right_knee_joint",
+        "lower_rad": "-0.087266999999999997",
+        "upper_rad": "2.8797999999999999"
+      },
+      {
+        "index": "10",
+        "name": "right_ankle_pitch_joint",
+        "lower_rad": "-0.87266999999999995",
+        "upper_rad": "0.52359999999999995"
+      },
+      {
+        "index": "11",
+        "name": "right_ankle_roll_joint",
+        "lower_rad": "-0.26179999999999998",
+        "upper_rad": "0.26179999999999998"
+      },
+      {
+        "index": "12",
+        "name": "waist_yaw_joint",
+        "lower_rad": "-2.6179999999999999",
+        "upper_rad": "2.6179999999999999"
+      },
+      {
+        "index": "13",
+        "name": "waist_roll_joint",
+        "lower_rad": "-0.52000000000000002",
+        "upper_rad": "0.52000000000000002"
+      },
+      {
+        "index": "14",
+        "name": "waist_pitch_joint",
+        "lower_rad": "-0.52000000000000002",
+        "upper_rad": "0.52000000000000002"
+      },
+      {
+        "index": "15",
+        "name": "left_shoulder_pitch_joint",
+        "lower_rad": "-3.0891999999999999",
+        "upper_rad": "2.6703999999999999"
+      },
+      {
+        "index": "16",
+        "name": "left_shoulder_roll_joint",
+        "lower_rad": "-1.5882000000000001",
+        "upper_rad": "2.2515000000000001"
+      },
+      {
+        "index": "17",
+        "name": "left_shoulder_yaw_joint",
+        "lower_rad": "-2.6179999999999999",
+        "upper_rad": "2.6179999999999999"
+      },
+      {
+        "index": "18",
+        "name": "left_elbow_joint",
+        "lower_rad": "-1.0471999999999999",
+        "upper_rad": "2.0943999999999998"
+      },
+      {
+        "index": "19",
+        "name": "left_wrist_roll_joint",
+        "lower_rad": "-1.9722220539999999",
+        "upper_rad": "1.9722220539999999"
+      },
+      {
+        "index": "20",
+        "name": "left_wrist_pitch_joint",
+        "lower_rad": "-1.6144295580000001",
+        "upper_rad": "1.6144295580000001"
+      },
+      {
+        "index": "21",
+        "name": "left_wrist_yaw_joint",
+        "lower_rad": "-1.6144295580000001",
+        "upper_rad": "1.6144295580000001"
+      },
+      {
+        "index": "22",
+        "name": "right_shoulder_pitch_joint",
+        "lower_rad": "-3.0891999999999999",
+        "upper_rad": "2.6703999999999999"
+      },
+      {
+        "index": "23",
+        "name": "right_shoulder_roll_joint",
+        "lower_rad": "-2.2515000000000001",
+        "upper_rad": "1.5882000000000001"
+      },
+      {
+        "index": "24",
+        "name": "right_shoulder_yaw_joint",
+        "lower_rad": "-2.6179999999999999",
+        "upper_rad": "2.6179999999999999"
+      },
+      {
+        "index": "25",
+        "name": "right_elbow_joint",
+        "lower_rad": "-1.0471999999999999",
+        "upper_rad": "2.0943999999999998"
+      },
+      {
+        "index": "26",
+        "name": "right_wrist_roll_joint",
+        "lower_rad": "-1.9722220539999999",
+        "upper_rad": "1.9722220539999999"
+      },
+      {
+        "index": "27",
+        "name": "right_wrist_pitch_joint",
+        "lower_rad": "-1.6144295580000001",
+        "upper_rad": "1.6144295580000001"
+      },
+      {
+        "index": "28",
+        "name": "right_wrist_yaw_joint",
+        "lower_rad": "-1.6144295580000001",
+        "upper_rad": "1.6144295580000001"
+      }
+    ]
+  },
+  "source_files": {
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/logs/20261007_174302_general32_lift_walk_start_A201_on/q.csv": {
+      "sha256": "17356cf9c3b8fc5a50a6e069835d92e681d88c103d7887e790692a94d8b73df1",
+      "bytes": 1495775
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/logs/20261007_174302_general32_lift_walk_start_A201_on/dq.csv": {
+      "sha256": "b6f11c5f4d7ebc165eafe21cf2d878e9e88efe5e54fdd56b130f46a8fe5938e6",
+      "bytes": 1485234
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/logs/20261007_174302_general32_lift_walk_start_A201_on/base_ang_vel.csv": {
+      "sha256": "da4e9df6b5e0aa122ed6cec1b25d47889b147a765afc349d042ad13be5df1abc",
+      "bytes": 343054
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/logs/20261007_174302_general32_lift_walk_start_A201_on/base_quat.csv": {
+      "sha256": "d3d12bb88ae1b26e4536f12153530c9d446fe9050f9f1808086cb7fc62be1ce6",
+      "bytes": 384945
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/logs/20261007_174302_general32_lift_walk_start_A201_on/action.csv": {
+      "sha256": "c847d29889ee82e257a152677d725a60cdf2fcde8ee41572b441dee0108d0d2a",
+      "bytes": 1494369
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/logs/20261007_174302_general32_lift_walk_start_A201_on/token_state.csv": {
+      "sha256": "7848237720aef5f01b1a1431ab3397ffdd7cb729e46f37c620a4f3661194e806",
+      "bytes": 3036638
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/logs/20261007_174302_general32_lift_walk_start_A201_on/motion_playing.csv": {
+      "sha256": "ed5ae4cad75ea8270ff0db4558843d137b0fd1544717650ae9c4bf12f90ddc54",
+      "bytes": 252279
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/logs/20261007_174302_general32_lift_walk_start_A201_on/residual.csv": {
+      "sha256": "94c021bf4b3cc631a1741ae25c09fa056a0bc53928a7fb61856fb8d37d3fd72c",
+      "bytes": 3213
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/logs/20261007_174302_general32_lift_walk_start_A201_on/startup_transition.jsonl": {
+      "sha256": "a05344917c7e6b25c0ad699bd7c5b3f224420492ac0c8b7dfffb2d70aa477b13",
+      "bytes": 159894
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/logs/20261007_174302_general32_lift_walk_start_A201_on/run_identity.json": {
+      "sha256": "bfe68c398f0ccb6df2cfe57ccfc7548a829b6fd9a3457288b07023209a075989",
+      "bytes": 21715
+    },
+    "/home/user/code/ge/guard_acceptance/hardware_phase_analysis_20261007/artifacts/20261007_174302_general32_lift_walk_start_A201_on_aligned.npz": {
+      "sha256": "dda1448e9482c59052099bac640ef91f8db3b91e04ee40cbfd0a5a39321efb88",
+      "bytes": 3079178
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/logs/20261007_174626_general32_high_watering_walk_A501_on/q.csv": {
+      "sha256": "3cdb59e4c1d5a49d4344ff5ecb3014f81934400aea7570f9c226a12a12b14f71",
+      "bytes": 1063941
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/logs/20261007_174626_general32_high_watering_walk_A501_on/dq.csv": {
+      "sha256": "fc1359807055473b6061e3a92935d19ed8ff29b927d366aece1e71d8d3825726",
+      "bytes": 1061963
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/logs/20261007_174626_general32_high_watering_walk_A501_on/base_ang_vel.csv": {
+      "sha256": "9ba787a77a9880321e2c2130a74cab895b9b907cad2d1ea4cb16b2c910bff3ca",
+      "bytes": 244550
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/logs/20261007_174626_general32_high_watering_walk_A501_on/base_quat.csv": {
+      "sha256": "d043b9babdd87eaaf7024d154cb98150f2f34270caf779beddbb3fb7e2c960ae",
+      "bytes": 274404
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/logs/20261007_174626_general32_high_watering_walk_A501_on/action.csv": {
+      "sha256": "f90d0b96fd824f286cb98e9aa0f5740856c119d9b6793179c5eb2d9ca9912ad0",
+      "bytes": 1063927
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/logs/20261007_174626_general32_high_watering_walk_A501_on/token_state.csv": {
+      "sha256": "61fffb9a64a14dcdf903ac232c25c05526581e17ced07e622e58d9b61f24d648",
+      "bytes": 2161016
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/logs/20261007_174626_general32_high_watering_walk_A501_on/motion_playing.csv": {
+      "sha256": "7b7d57ecacbeb49178a276c43b403628976402dd977665b0118d9e04f14e5c8d",
+      "bytes": 179774
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/logs/20261007_174626_general32_high_watering_walk_A501_on/residual.csv": {
+      "sha256": "fa89a237a297b902a1962e1c87f59a129396f03c1d05c33c2288411e9aa1b7c3",
+      "bytes": 2283
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/logs/20261007_174626_general32_high_watering_walk_A501_on/startup_transition.jsonl": {
+      "sha256": "424ca2b1aaeda1d5811be235a7452b3d5d7b4424ac507d5a8a0efc788ec8a888",
+      "bytes": 160305
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/logs/20261007_174626_general32_high_watering_walk_A501_on/run_identity.json": {
+      "sha256": "b463ded567af0bca61cfad275b60b8563a2d81457c6d398fa509b33b477d4d5a",
+      "bytes": 21374
+    },
+    "/home/user/code/ge/guard_acceptance/hardware_phase_analysis_20261007/artifacts/20261007_174626_general32_high_watering_walk_A501_on_aligned.npz": {
+      "sha256": "a44b458860baab0819d74ce3365ad3ee37a4bbce9348b3dad1a253fd958dd9ae",
+      "bytes": 2391089
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/assets/general32_native42_residual.onnx": {
+      "sha256": "f9ad4973f3238db1caf56a821c90fa4ce44b01aedcb9b6f8575393fea23fd107",
+      "bytes": 3656845
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/assets/sonic_original_decoder.onnx": {
+      "sha256": "7e27a100cd540ea6037d2708ff87a5e2d97b79246d4c658fb3c0522b56b37a6d",
+      "bytes": 40739778
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/assets/sonic_original_g1_encoder.onnx": {
+      "sha256": "19010ef7d5a89540e9b6909a94191829e64e167240e5108a8047a87a2bbb8ecc",
+      "bytes": 16931216
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/assets/observation_config.yaml": {
+      "sha256": "1661e659c3e1c30d6b709e471a35eb3b6bd6093e3ab547fa1291b6d856ffd5ec",
+      "bytes": 883
+    },
+    "/home/user/code/ge/SoftSONIC_GuardedBundle_20261006/assets/export_core_manifest.json": {
+      "sha256": "af52f449b435724704d14e7ed586e20059bf593f381846edbb0679f365787e8d",
+      "bytes": 2950
+    },
+    "/home/user/code/ge/SoftSONIC-controller-guard-v1/gear_sonic_deploy/src/g1/g1_deploy_onnx_ref/src/g1_deploy_softsonic.cpp": {
+      "sha256": "5b61d8bcb054c24f69e3439b59a1dfd0cdf7a4465140eeae40aa619f3a4b92a2",
+      "bytes": 243533
+    },
+    "/home/user/code/ge/SoftSONIC-controller-guard-v1/gear_sonic_deploy/src/g1/g1_deploy_onnx_ref/src/state_logger.cpp": {
+      "sha256": "21532714aed16d7aa0faa5b4e27b5665a5022defe24daeb795b594e92c659dc0",
+      "bytes": 22571
+    },
+    "/home/user/code/ge/SoftSONIC-controller-guard-v1/gear_sonic_deploy/src/g1/g1_deploy_onnx_ref/include/math_utils.hpp": {
+      "sha256": "d85de60b9f2c6a4d26b1380264b172b3380200138173998f2a64660310f3c4d5",
+      "bytes": 19188
+    },
+    "/home/user/code/ge/SoftSONIC-controller-guard-v1/gear_sonic_deploy/src/g1/g1_deploy_onnx_ref/include/softsonic_core.hpp": {
+      "sha256": "fc402f0cfbfb1d323f260573520eb3a208b82d9a0de40be5e9827ab109f6f072",
+      "bytes": 4888
+    },
+    "/home/user/code/ge/SoftSONIC-controller-guard-v1/gear_sonic_deploy/src/g1/g1_deploy_onnx_ref/include/softsonic_residual.hpp": {
+      "sha256": "c404ee788a4b22de0e90d4cac37a660d7aebb14b88b94f9cf9e3c7268c77e2ca",
+      "bytes": 5287
+    },
+    "/home/user/code/ge/SoftSONIC-controller-guard-v1/gear_sonic_deploy/src/g1/g1_deploy_onnx_ref/include/policy_parameters.hpp": {
+      "sha256": "b9332adf07c2c9b75c9b1e0756e57c7a1c2a890d8bb0aa53c3f1905fb739b791",
+      "bytes": 11868
+    },
+    "/home/user/code/ge/SoftSONIC-controller-guard-v1/gear_sonic_deploy/target/release/g1_deploy_softsonic": {
+      "sha256": "7170662a5aa864627d4466ee328072be5c5cdab0c58a7ab0a3d77c4d9a3e9af7",
+      "bytes": 5622384
+    }
+  },
+  "run_references": {
+    "20261007_174302_general32_lift_walk_start_A201_on": {
+      "exact_source": "230216/lift_crate_walk_ff_start_360_R_001__A201.csv",
+      "training_split": "current32-unseen_future-full-training-candidate",
+      "frames": 840,
+      "fps": 50,
+      "duration_ticks_s": 16.8,
+      "root": "/home/user/code/ge/SoftSONIC_general32_真机动态动作合并包_20261007/motion_sets/lift_walk_start_A201",
+      "files": {
+        "motion_sets/lift_walk_start_A201/lift_crate_walk_ff_start_360_R_001__A201/body_ang_vel.csv": {
+          "sha256": "6e1501487b0ad1417d8bd050ea87950868f5291f0c7caae0d81a90b6537e028b",
+          "expected_sha256": "6e1501487b0ad1417d8bd050ea87950868f5291f0c7caae0d81a90b6537e028b"
+        },
+        "motion_sets/lift_walk_start_A201/lift_crate_walk_ff_start_360_R_001__A201/body_lin_vel.csv": {
+          "sha256": "1f1a186b7e91b02c59d3e0f2b4daaf15e993de169bc2a1c4ff7fb21a22c0c4cf",
+          "expected_sha256": "1f1a186b7e91b02c59d3e0f2b4daaf15e993de169bc2a1c4ff7fb21a22c0c4cf"
+        },
+        "motion_sets/lift_walk_start_A201/lift_crate_walk_ff_start_360_R_001__A201/body_pos.csv": {
+          "sha256": "4586c9166f7d6941e395f83edf39c8b506a3f38cdf9c4e3b23e9cf5fe0756310",
+          "expected_sha256": "4586c9166f7d6941e395f83edf39c8b506a3f38cdf9c4e3b23e9cf5fe0756310"
+        },
+        "motion_sets/lift_walk_start_A201/lift_crate_walk_ff_start_360_R_001__A201/body_quat.csv": {
+          "sha256": "2d27aad9a7ffa279160e75b3ddc90ef4b8060a8fa88a24532583b8a1a88f7e88",
+          "expected_sha256": "2d27aad9a7ffa279160e75b3ddc90ef4b8060a8fa88a24532583b8a1a88f7e88"
+        },
+        "motion_sets/lift_walk_start_A201/lift_crate_walk_ff_start_360_R_001__A201/info.txt": {
+          "sha256": "2b7a7cafc8e55ab6cfc7aa6ac1074477c83883def9491912f021ad492cdeed60",
+          "expected_sha256": "2b7a7cafc8e55ab6cfc7aa6ac1074477c83883def9491912f021ad492cdeed60"
+        },
+        "motion_sets/lift_walk_start_A201/lift_crate_walk_ff_start_360_R_001__A201/joint_pos.csv": {
+          "sha256": "f7ae6209936fa3595b2a7296f456ea2ef35a1561c11dc46d95760d21ee644097",
+          "expected_sha256": "f7ae6209936fa3595b2a7296f456ea2ef35a1561c11dc46d95760d21ee644097"
+        },
+        "motion_sets/lift_walk_start_A201/lift_crate_walk_ff_start_360_R_001__A201/joint_vel.csv": {
+          "sha256": "990ed7424f0a7a903c34a7e7e4c5716f3d60004f5c9bf8bc456ee422b1c1607d",
+          "expected_sha256": "990ed7424f0a7a903c34a7e7e4c5716f3d60004f5c9bf8bc456ee422b1c1607d"
+        },
+        "motion_sets/lift_walk_start_A201/lift_crate_walk_ff_start_360_R_001__A201/metadata.txt": {
+          "sha256": "97f959ff3574357d017798802e43a54b1be96c6466e405b1ce57d9c141704e86",
+          "expected_sha256": "97f959ff3574357d017798802e43a54b1be96c6466e405b1ce57d9c141704e86"
+        }
+      },
+      "historic_stand_label_correction": false
+    },
+    "20261007_174626_general32_high_watering_walk_A501_on": {
+      "exact_source": "231110/watering_plants_high_walk_ff_stop_360_R_002__A501.csv",
+      "training_split": "current32-unseen_future-full-training-candidate",
+      "frames": 765,
+      "fps": 50,
+      "duration_ticks_s": 15.3,
+      "root": "/home/user/code/ge/SoftSONIC_general32_真机动态动作合并包_20261007/motion_sets/high_watering_walk_A501",
+      "files": {
+        "motion_sets/high_watering_walk_A501/watering_plants_high_walk_ff_stop_360_R_002__A501/body_ang_vel.csv": {
+          "sha256": "c2eae58a9bf6a2bf2c1c4bba06f303cd2363bbd3aaff3317e406d337e83b53b8",
+          "expected_sha256": "c2eae58a9bf6a2bf2c1c4bba06f303cd2363bbd3aaff3317e406d337e83b53b8"
+        },
+        "motion_sets/high_watering_walk_A501/watering_plants_high_walk_ff_stop_360_R_002__A501/body_lin_vel.csv": {
+          "sha256": "0af00d2aae6a21b080bda73bcd0eed93bf15e2ef7be29c0dd3101410e1a96e3e",
+          "expected_sha256": "0af00d2aae6a21b080bda73bcd0eed93bf15e2ef7be29c0dd3101410e1a96e3e"
+        },
+        "motion_sets/high_watering_walk_A501/watering_plants_high_walk_ff_stop_360_R_002__A501/body_pos.csv": {
+          "sha256": "48ad607425a5a61b679604247ac900323ce20a5542f987499d30c5f1daf312c9",
+          "expected_sha256": "48ad607425a5a61b679604247ac900323ce20a5542f987499d30c5f1daf312c9"
+        },
+        "motion_sets/high_watering_walk_A501/watering_plants_high_walk_ff_stop_360_R_002__A501/body_quat.csv": {
+          "sha256": "e25ef8c3a3e72442469aafe6283c0ddd3cfb92f12a80bb8200d4a29193072fa5",
+          "expected_sha256": "e25ef8c3a3e72442469aafe6283c0ddd3cfb92f12a80bb8200d4a29193072fa5"
+        },
+        "motion_sets/high_watering_walk_A501/watering_plants_high_walk_ff_stop_360_R_002__A501/info.txt": {
+          "sha256": "2b7a7cafc8e55ab6cfc7aa6ac1074477c83883def9491912f021ad492cdeed60",
+          "expected_sha256": "2b7a7cafc8e55ab6cfc7aa6ac1074477c83883def9491912f021ad492cdeed60"
+        },
+        "motion_sets/high_watering_walk_A501/watering_plants_high_walk_ff_stop_360_R_002__A501/joint_pos.csv": {
+          "sha256": "b3d0e898d0b9ac67ed52aeda3386e82178e7e4cfc92a1a03e0998fdac4a58a8a",
+          "expected_sha256": "b3d0e898d0b9ac67ed52aeda3386e82178e7e4cfc92a1a03e0998fdac4a58a8a"
+        },
+        "motion_sets/high_watering_walk_A501/watering_plants_high_walk_ff_stop_360_R_002__A501/joint_vel.csv": {
+          "sha256": "7479cbdd43b4a3a395774b854522556fab7f1099833d9e3045ef7b2b3994eba0",
+          "expected_sha256": "7479cbdd43b4a3a395774b854522556fab7f1099833d9e3045ef7b2b3994eba0"
+        },
+        "motion_sets/high_watering_walk_A501/watering_plants_high_walk_ff_stop_360_R_002__A501/metadata.txt": {
+          "sha256": "4af7cb4e0ecc2b9ae9b9228fb53291182e309bd33c8a3d35b9ca2b2f484c11b0",
+          "expected_sha256": "4af7cb4e0ecc2b9ae9b9228fb53291182e309bd33c8a3d35b9ca2b2f484c11b0"
+        }
+      },
+      "historic_stand_label_correction": false
+    }
+  },
+  "anchor_input_audit": [
+    {
+      "run_id": "20261007_174302_general32_lift_walk_start_A201_on",
+      "tick": 281,
+      "stage": "CONTROL_PLAY",
+      "phase": "PLAY",
+      "reconstructed_obs_vs_direct_float32": {
+        "max_abs": 1.862645149230957e-09,
+        "mean_abs": 5.66233798200565e-11,
+        "rms": 1.8044927732653973e-10
+      },
+      "nominal_token_vs_snapshot": {
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "rms": 0.0
+      },
+      "terms_max_error": {
+        "base_ang_vel": 9.313225746154785e-10,
+        "joint_pos": 0.0,
+        "joint_vel": 9.313225746154785e-10,
+        "last_actions": 4.656612873077393e-10,
+        "gravity": 1.862645149230957e-09
+      }
+    },
+    {
+      "run_id": "20261007_174302_general32_lift_walk_start_A201_on",
+      "tick": 1120,
+      "stage": "CONTROL_HOLD",
+      "phase": "PLAY",
+      "reconstructed_obs_vs_direct_float32": {
+        "max_abs": 1.862645149230957e-09,
+        "mean_abs": 1.8901842576201243e-11,
+        "rms": 1.3096549846368668e-10
+      },
+      "nominal_token_vs_snapshot": {
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "rms": 0.0
+      },
+      "terms_max_error": {
+        "base_ang_vel": 4.656612873077393e-10,
+        "joint_pos": 1.862645149230957e-09,
+        "joint_vel": 4.656612873077393e-10,
+        "last_actions": 2.3283064365386963e-10,
+        "gravity": 0.0
+      }
+    },
+    {
+      "run_id": "20261007_174626_general32_high_watering_walk_A501_on",
+      "tick": 339,
+      "stage": "CONTROL_PLAY",
+      "phase": "PLAY",
+      "reconstructed_obs_vs_direct_float32": {
+        "max_abs": 7.450580596923828e-09,
+        "mean_abs": 8.443338071717129e-11,
+        "rms": 3.237333020172605e-10
+      },
+      "nominal_token_vs_snapshot": {
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "rms": 0.0
+      },
+      "terms_max_error": {
+        "base_ang_vel": 4.656612873077393e-10,
+        "joint_pos": 1.862645149230957e-09,
+        "joint_vel": 4.656612873077393e-10,
+        "last_actions": 4.656612873077393e-10,
+        "gravity": 7.450580596923828e-09
+      }
+    },
+    {
+      "run_id": "20261007_174626_general32_high_watering_walk_A501_on",
+      "tick": 1103,
+      "stage": "CONTROL_HOLD",
+      "phase": "PLAY",
+      "reconstructed_obs_vs_direct_float32": {
+        "max_abs": 1.4901161193847656e-08,
+        "mean_abs": 6.508852620559033e-11,
+        "rms": 5.234415313889167e-10
+      },
+      "nominal_token_vs_snapshot": {
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "rms": 0.0
+      },
+      "terms_max_error": {
+        "base_ang_vel": 4.656612873077393e-10,
+        "joint_pos": 1.862645149230957e-09,
+        "joint_vel": 9.313225746154785e-10,
+        "last_actions": 0.0,
+        "gravity": 1.4901161193847656e-08
+      }
+    }
+  ],
+  "sample_metadata": [
+    {
+      "run_id": "20261007_174302_general32_lift_walk_start_A201_on",
+      "tick": 615,
+      "selection_reasons": [
+        "right_wrist_pitch_interior"
+      ],
+      "sparse_residual": null
+    },
+    {
+      "run_id": "20261007_174302_general32_lift_walk_start_A201_on",
+      "tick": 705,
+      "selection_reasons": [
+        "right_wrist_pitch_endpoint"
+      ],
+      "sparse_residual": null
+    },
+    {
+      "run_id": "20261007_174302_general32_lift_walk_start_A201_on",
+      "tick": 1120,
+      "selection_reasons": [
+        "direct_policy_snapshot_last_play_frame"
+      ],
+      "sparse_residual": null
+    },
+    {
+      "run_id": "20261007_174302_general32_lift_walk_start_A201_on",
+      "tick": 1130,
+      "selection_reasons": [
+        "right_wrist_pitch_interior"
+      ],
+      "sparse_residual": {
+        "tick": "1130",
+        "frame": "839",
+        "warmup_samples": "10",
+        "mode": "on",
+        "gain": "1",
+        "inference_ms": "0.201176",
+        "delta_l2": "1.32961",
+        "delta_max": "0.379319"
+      }
+    },
+    {
+      "run_id": "20261007_174302_general32_lift_walk_start_A201_on",
+      "tick": 1150,
+      "selection_reasons": [
+        "sparse_residual_tick_1150"
+      ],
+      "sparse_residual": {
+        "tick": "1150",
+        "frame": "839",
+        "warmup_samples": "30",
+        "mode": "on",
+        "gain": "1",
+        "inference_ms": "0.133518",
+        "delta_l2": "1.31605",
+        "delta_max": "0.421886"
+      }
+    },
+    {
+      "run_id": "20261007_174302_general32_lift_walk_start_A201_on",
+      "tick": 2328,
+      "selection_reasons": [
+        "right_wrist_pitch_endpoint"
+      ],
+      "sparse_residual": null
+    },
+    {
+      "run_id": "20261007_174626_general32_high_watering_walk_A501_on",
+      "tick": 720,
+      "selection_reasons": [
+        "right_wrist_pitch_endpoint"
+      ],
+      "sparse_residual": null
+    },
+    {
+      "run_id": "20261007_174626_general32_high_watering_walk_A501_on",
+      "tick": 726,
+      "selection_reasons": [
+        "right_wrist_pitch_interior"
+      ],
+      "sparse_residual": null
+    },
+    {
+      "run_id": "20261007_174626_general32_high_watering_walk_A501_on",
+      "tick": 1103,
+      "selection_reasons": [
+        "direct_policy_snapshot_last_play_frame"
+      ],
+      "sparse_residual": null
+    },
+    {
+      "run_id": "20261007_174626_general32_high_watering_walk_A501_on",
+      "tick": 1119,
+      "selection_reasons": [
+        "right_wrist_pitch_interior"
+      ],
+      "sparse_residual": null
+    },
+    {
+      "run_id": "20261007_174626_general32_high_watering_walk_A501_on",
+      "tick": 1150,
+      "selection_reasons": [
+        "sparse_residual_tick_1150"
+      ],
+      "sparse_residual": {
+        "tick": "1150",
+        "frame": "764",
+        "warmup_samples": "47",
+        "mode": "on",
+        "gain": "1",
+        "inference_ms": "0.135847",
+        "delta_l2": "0.96082",
+        "delta_max": "0.352386"
+      }
+    },
+    {
+      "run_id": "20261007_174626_general32_high_watering_walk_A501_on",
+      "tick": 1816,
+      "selection_reasons": [
+        "right_wrist_pitch_endpoint"
+      ],
+      "sparse_residual": null
+    }
+  ],
+  "reconstruction": "10 consecutive current-and-previous states, oldest->newest, term-major [angular30,q290,dq290,previous_action290,gravity30]. q hardware-default then SDK->Isaac; gravity uses conjugate wxyz without normalization.",
+  "nominal_token_provenance": "token_state.csv logged after encoder, before ResidualEngine.Apply; independently matches direct snapshot nominal_token.",
+  "precision": "CSV has9 fractional digits; reconstruction is approximate, not bit-exact original obs. Four direct float32 policy snapshots quantify error. FSQ nominal grid is exactly float32 representable in selected rows.",
+  "normalization": "Original actor ONNX embeds frozen checkpoint RMS and normalized-input clip. Raw obs930 provided once; no manual normalization. Decoder receives raw obs930.",
+  "preclip_output": "unknown: original decoder exposes only postclip action. No ONNX graph intermediate extractor installed; no deployment graph/weights altered.",
+  "unknown": [
+    "human force/release events",
+    "force magnitude/direction",
+    "motor firmware internal timing/torque saturation",
+    "unclipped decoder output",
+    "exact full float32 obs at nonsnapshot ticks"
+  ],
+  "scope": "Fixed recorded state, instantaneous target intervention only. This is not an off closed-loop trajectory or compliance-gain test."
+}

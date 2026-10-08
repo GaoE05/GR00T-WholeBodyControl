@@ -172,3 +172,10 @@ python3 /home/user/code/ge/SoftSONIC-hardware-results-20261007/notes/hardware/an
 此脚本先核验原库存SHA、只做文件I/O和数组运算，不加载ONNX、GPU或DDS。导出契约证据为当前 `assets/export_core_manifest.json`，SHA `af52f449b435724704d14e7ed586e20059bf593f381846edbb0679f365787e8d`：decoder输入cat(token64,raw_obs930)，输出已clip±3；residual输出已clip(.15*actor,±.5)。不能把token顺序反过来作未来重放。
 
 仍unknown：施力/放手时刻、左右手/方向/力度、真正无力阶段、恢复事件、clip前decoder值、每tick64维delta及归一化输入clip情况、固件已施加/饱和力矩、LowState源采集年龄、真机视频关联。未代填恢复PASS或每条效果均PASS。
+
+
+## 2026-10-08 同观测反事实补充（CPU，无新真机实验）
+
+见 [counterfactual_20261008/CONCLUSIONS.md](counterfactual_20261008/CONCLUSIONS.md)。A201/on174302、A501/on174626各播放/末帧3tick，共12份固定obs/nominal样本；四个直接float32锚点核对CSV重建最大误差1.49e-8，nominal匹配0；回放raw最大误差2.3842e-6、最终目标1.0431e-6rad。两份主样本有原始直接输入，其他10份为经锚点核对的精度受限重建。
+
+同观察下确认nominal自身到边界、residual推到边界与从边界拉离均存在。腕部端点不能推导全臂目标无作用：A201/tick705右肩反事实目标差约−1.41745rad、右肘−.43872rad；A501/tick726右肘+.50951rad。它们不是相邻真实命令跳变量或已实际实现的位移。肩肘即时作用与既往PD跟随误差并存，不能凭此唯一归因硬件，亦不证明闭环柔顺净增益/恢复。裁剪前输出仍unknown/null，原接口仅postclip；没有人手事件补写。部署模型/参数/binary不变，未启动DDS/G1/GPU。输入NPZ、29关节结果、资产身份及portable脚本已存本地Git。

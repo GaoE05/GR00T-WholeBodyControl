@@ -126,3 +126,8 @@
 `/home/user/code/ge/guard_acceptance/hardware_phase_analysis_20261007/artifacts/`：九个重点run `_aligned.npz`、`_detail.json` 与 `phase_analysis_full.json`，完整描述统计与时间对齐数组。Git/ZIP中的 `general32_phase_analysis_20261007.json` 指明路径、SHA和原日志SHA。三个profile共9次：onehand_A508的141649on/150609off/150721on/151808off/151858on，A201的174302on/174456off，A501的174626on/174737off（均20261007）。
 
 数组保留SDK/PR顺序raw/current-new-target/as-of-writer-target/actual q/dq/tau_est/PD代理和phase/timestamp；不含外力或施力/放手标注。其他27次只有phase/raw/residual统计，不声称均做了writer对齐。所有原日志和既有视频位置不变；本次未生成真机录像。
+
+
+## 2026-10-08 CPU固定观察小样本
+
+`notes/hardware/counterfactual_20261008/`包含samples.npz/identity/results/29关节CSV及结论；12个A201/A501样本与四个锚点校准，不含完整原日志。原日志沿已有两个run路径，source SHA在identity。portable验证产物在 `/home/user/code/ge/guard_acceptance/counterfactual_20261008/portable_verification/`，可从包内NPZ与同SHA原actor/decoder重放，无需原日志。未添加施力/放手事件、真机视频或新实验。
